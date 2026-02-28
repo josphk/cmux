@@ -68,6 +68,88 @@ This creates an isolated app with its own name, bundle ID, socket, and derived d
 
 Before launching a new tagged run, clean up any older tags you started in this session (quit old tagged app + remove its `/tmp` socket/derived data).
 
+## Development workflow (for fork contributors)
+
+### Recommended approach: Tagged Debug builds
+
+Use tagged Debug builds for feature development. This gives you debug logging, fast iteration, and isolation from production:
+
+```bash
+# Start working on a feature
+git checkout -b feature/element-picker
+./scripts/reload.sh --tag element-picker
+
+# Make code changes, then rebuild/test
+./scripts/reload.sh --tag element-picker
+
+# Watch debug log in another terminal
+tail -f /tmp/cmux-debug-element-picker.log
+```
+
+Each tagged build creates an isolated app with its own bundle ID, socket, and debug log, so you can run multiple features side-by-side.
+
+### Git setup
+
+```bash
+# Verify your fork is set as origin
+git remote -v
+
+# Add upstream if not already present
+git remote add upstream https://github.com/manaflow-ai/cmux.git
+
+# Keep your fork updated
+git checkout main
+git fetch upstream
+git merge upstream/main
+git push origin main
+```
+
+### Development cycle
+
+```bash
+# 1. Create feature branch
+git checkout -b feature/my-feature
+
+# 2. Start tagged debug build
+./scripts/reload.sh --tag my-feature
+
+# 3. Edit code
+# Sources/Panels/BrowserPanel.swift, etc.
+
+# 4. Rebuild and test
+./scripts/reload.sh --tag my-feature
+
+# 5. Commit when ready
+git add .
+git commit -m "Add my feature"
+
+# 6. Push to your fork
+git push origin feature/my-feature
+```
+
+### When to build Release
+
+Only build Release when:
+- Feature is complete and tested in Debug
+- You need production performance for daily use
+- Creating a DMG for distribution
+
+```bash
+./scripts/reloadp.sh  # Build and launch Release
+```
+
+### Cleanup tagged builds
+
+When done with a feature:
+
+```bash
+pkill -f "cmux DEV my-feature"
+rm -rf /tmp/cmux-my-feature
+rm -f /tmp/cmux-debug-my-feature.sock
+rm -f /tmp/cmux-debug-my-feature.log
+rm -f ~/Library/Application\ Support/cmux/cmuxd-dev-my-feature.sock
+```
+
 ## Debug event log
 
 All debug events (keys, mouse, focus, splits, tabs) go to a unified log in DEBUG builds:
