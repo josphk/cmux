@@ -1,5 +1,7 @@
 # Token Cost Sidebar Widget — Feature Plan
 
+> **Revised** after review (see `REVIEW.md`). Collapsed from 4 phases to 2. Dropped per-panel tracking, `AgentType` enum, and `report_meta` detour.
+
 ## Overview
 
 Add a persistent widget at the bottom of cmux's vertical tab sidebar that displays live token usage and cost for each running coding agent. The initial implementation targets **pi coding agent** (`@mariozechner/pi-coding-agent`), with the architecture designed for future agent support (Claude Code, Aider, etc.).
@@ -15,27 +17,28 @@ The widget sits between the tab list and the existing footer (UpdatePill / Sideb
 │  pi coding agent (running in a terminal pane)            │
 │                                                          │
 │  pi extension (cmux-token-reporter.ts)                   │
-│    ├─ hooks agent_turn_complete / message_update events   │
+│    ├─ hooks agent_turn_complete events                   │
 │    ├─ reads ctx.sessionManager.getBranch() for usage      │
-│    └─ sends stats via cmux socket command                 │
-│       `report_meta token_cost <formatted> --icon=...`    │
-│       OR a new dedicated socket command `report_tokens`   │
+│    ├─ debounces (skip if cost delta < $0.001)            │
+│    └─ sends via Node net.connect() to cmux socket        │
+│       `report_tokens --cost=0.45 --input=50000 ...`      │
 └────────────────────────┬─────────────────────────────────┘
                          │  unix socket
                          ▼
 ┌──────────────────────────────────────────────────────────┐
 │  cmux (TerminalController.swift)                         │
-│    ├─ parses `report_tokens` command                     │
-│    ├─ updates Workspace.tokenUsage published property    │
-│    └─ off-main parsing, main.async for model mutation    │
+│    ├─ parses `report_tokens` command off-main            │
+│    ├─ DispatchQueue.main.async for model mutation        │
+│    └─ updates Workspace.tokenUsage (@Published)          │
 └────────────────────────┬─────────────────────────────────┘
-                         │  @Published
+                         │  SwiftUI observation
                          ▼
 ┌──────────────────────────────────────────────────────────┐
 │  TokenCostSidebarWidget (SwiftUI)                        │
 │    ├─ observes TabManager.tabs[*].tokenUsage             │
-│    ├─ shows per-workspace breakdown                      │
-│    └─ shows session total across all workspaces          │
+│    ├─ shows aggregate total with .numericText() anim     │
+│    ├─ expand/collapse per-workspace only when count > 1  │
+│    └─ shows grayed $0.00 after agents finish (sticky)    │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -66,33 +69,17 @@ interface Usage {
 }
 ```
 
-### Reporting mechanism
-
-**Option A — Use existing `report_meta` socket command (simplest, no Swift changes needed initially):**
-
-```bash
-# From extension, shell out to cmux CLI:
-cmux report_meta token_cost "$0.42 · 105k tokens" \
-  --icon="sf:dollarsign.circle" \
-  --color="#4CAF50" \
-  --priority=999
-```
-
-This immediately appears in the sidebar metadata rows for the active workspace. However, it mixes with other metadata and doesn't enable a dedicated aggregated widget.
-
-**Option B — New dedicated `report_tokens` socket command (recommended):**
+### Socket command
 
 ```
-report_tokens --input=50000 --output=10000 --cache-read=40000 --cache-write=5000 --cost=0.45 [--tab=X] [--panel=Y]
+report_tokens --cost=0.45 --input=50000 --output=10000 --cache-read=40000 --cache-write=5000 --model=claude-sonnet-4-20250514 [--tab=X]
 ```
 
-This stores structured data on the Workspace, enabling a richer dedicated UI.
-
-### Extension implementation sketch
+### Extension implementation
 
 ```typescript
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { execSync } from "child_process";
+import { createConnection } from "net";
 
 export default function (pi: ExtensionAPI) {
   let lastReportedCost = -1;
@@ -115,22 +102,24 @@ export default function (pi: ExtensionAPI) {
     if (Math.abs(totalCost - lastReportedCost) < 0.001) return;
     lastReportedCost = totalCost;
 
-    // Detect cmux socket path from environment
-    const socketPath = process.env.CMUX_SOCKET
-      ?? findCmuxSocket();  // scan /tmp/cmux-*.sock
+    const socketPath = process.env.CMUX_SOCKET_PATH
+      ?? process.env.CMUX_SOCKET
+      ?? "/tmp/cmux.sock";
 
-    if (!socketPath) return;
+    const modelId = ctx.model?.id ?? "unknown";
+
+    const cmd = `report_tokens --cost=${totalCost.toFixed(4)}`
+      + ` --input=${totalInput} --output=${totalOutput}`
+      + ` --cache-read=${totalCacheRead} --cache-write=${totalCacheWrite}`
+      + ` --model=${modelId}`;
 
     try {
-      // Option B: structured command
-      execSync(
-        `echo 'report_tokens --input=${totalInput} --output=${totalOutput}` +
-        ` --cache-read=${totalCacheRead} --cache-write=${totalCacheWrite}` +
-        ` --cost=${totalCost.toFixed(4)}' | nc -U "${socketPath}"`,
-        { timeout: 2000, stdio: "ignore" }
-      );
+      const sock = createConnection(socketPath);
+      sock.on("error", () => {}); // silently ignore
+      sock.write(cmd + "\n");
+      sock.end();
     } catch {
-      // Silently ignore — cmux may not be running
+      // cmux may not be running
     }
   }
 
@@ -142,10 +131,12 @@ export default function (pi: ExtensionAPI) {
 
 ### Socket discovery
 
-The extension needs to find the cmux socket. Strategies:
-1. **`CMUX_SOCKET` env var** — cmux can set this in terminal environments it spawns
-2. **Well-known path scan** — `/tmp/cmux-debug.sock`, `~/Library/Application Support/cmux/cmuxd.sock`
-3. **`cmux` CLI** — if `cmux` is on PATH, use `cmux report_meta ...` directly
+The extension finds the cmux socket via environment variables auto-set by cmux in spawned terminals:
+1. **`CMUX_SOCKET_PATH`** (primary) — auto-set by cmux in terminal environments
+2. **`CMUX_SOCKET`** (fallback alias)
+3. **`/tmp/cmux.sock`** (default well-known path)
+
+No well-known path scanning or CLI subprocess needed in Phase 1.
 
 ---
 
@@ -163,21 +154,12 @@ struct TokenUsageState: Equatable {
     var cacheWrite: Int = 0
     var totalTokens: Int = 0
     var cost: Double = 0.0           // USD
+    var model: String?               // e.g. "claude-sonnet-4-20250514"
     var lastUpdated: Date = Date()
-    var agentType: AgentType = .unknown
-
-    enum AgentType: String {
-        case pi = "pi"
-        case claudeCode = "claude-code"
-        case aider = "aider"
-        case unknown = "unknown"
-    }
 
     var formattedCost: String {
         if cost < 0.01 {
             return String(format: "$%.4f", cost)
-        } else if cost < 1.0 {
-            return String(format: "$%.2f", cost)
         } else {
             return String(format: "$%.2f", cost)
         }
@@ -192,35 +174,31 @@ struct TokenUsageState: Equatable {
         }
         return "\(total)"
     }
+
+    /// Human-readable model name: strips date suffixes and common prefixes.
+    var displayModelName: String? {
+        guard let model, !model.isEmpty, model != "unknown" else { return nil }
+        // "claude-sonnet-4-20250514" → "claude-sonnet-4"
+        // "gpt-4o-2024-08-06" → "gpt-4o"
+        let parts = model.split(separator: "-")
+        // Drop trailing segment if it looks like a date (8 digits)
+        if let last = parts.last, last.count == 8, last.allSatisfy(\.isNumber) {
+            return parts.dropLast().joined(separator: "-")
+        }
+        return model
+    }
 }
 ```
 
 ### 3b. Add to `Workspace`
 
 ```swift
-// In Sources/Workspace.swift, add to the Workspace class:
+// In Sources/Workspace.swift, add to the Workspace class published properties:
+
 @Published var tokenUsage: TokenUsageState?
-
-// Per-panel token usage (for split panes running different agents)
-@Published var panelTokenUsage: [UUID: TokenUsageState] = [:]
-
-// Computed aggregate for the workspace
-var aggregateTokenUsage: TokenUsageState? {
-    let usages = panelTokenUsage.values
-    guard !usages.isEmpty else { return tokenUsage }
-    var agg = TokenUsageState()
-    for u in usages {
-        agg.input += u.input
-        agg.output += u.output
-        agg.cacheRead += u.cacheRead
-        agg.cacheWrite += u.cacheWrite
-        agg.cost += u.cost
-    }
-    agg.totalTokens = agg.input + agg.output + agg.cacheRead + agg.cacheWrite
-    agg.lastUpdated = usages.map(\.lastUpdated).max() ?? Date()
-    return agg
-}
 ```
+
+Single property. No per-panel tracking, no computed aggregation. Add per-panel later if a real use case appears.
 
 ### 3c. Socket command — `report_tokens`
 
@@ -229,9 +207,11 @@ Add to `TerminalController.swift` command dispatch:
 ```swift
 case "report_tokens":
     return handleReportTokens(args)
+case "clear_tokens":
+    return handleClearTokens(args)
 ```
 
-Handler (follows socket command threading policy — parse off-main, minimal main.async):
+Handler (follows socket command threading policy — parse off-main, minimal `main.async`):
 
 ```swift
 private func handleReportTokens(_ args: String) -> String {
@@ -245,9 +225,7 @@ private func handleReportTokens(_ args: String) -> String {
     let output = Int(parsed.options["output"] ?? "") ?? 0
     let cacheRead = Int(parsed.options["cache-read"] ?? "") ?? 0
     let cacheWrite = Int(parsed.options["cache-write"] ?? "") ?? 0
-    let agentType = TokenUsageState.AgentType(
-        rawValue: parsed.options["agent"] ?? "unknown"
-    ) ?? .unknown
+    let model = parsed.options["model"]
 
     let state = TokenUsageState(
         input: input,
@@ -256,30 +234,38 @@ private func handleReportTokens(_ args: String) -> String {
         cacheWrite: cacheWrite,
         totalTokens: input + output + cacheRead + cacheWrite,
         cost: cost,
-        lastUpdated: Date(),
-        agentType: agentType
+        model: model,
+        lastUpdated: Date()
     )
 
     let tabId = resolveTabId(parsed.options["tab"])
-    let panelId = resolvePanelId(parsed.options["panel"], tab: tabId)
 
     DispatchQueue.main.async {
         guard let workspace = self.resolveWorkspace(tabId) else { return }
-        if let panelId {
-            workspace.panelTokenUsage[panelId] = state
-        } else {
-            workspace.tokenUsage = state
-        }
+        workspace.tokenUsage = state
+    }
+
+    return "OK"
+}
+
+private func handleClearTokens(_ args: String) -> String {
+    let parsed = parseArgs(args)
+    let tabId = resolveTabId(parsed.options["tab"])
+
+    DispatchQueue.main.async {
+        guard let workspace = self.resolveWorkspace(tabId) else { return }
+        workspace.tokenUsage = nil
     }
 
     return "OK"
 }
 ```
 
-Add help text alongside existing report commands:
+Help text:
 
 ```
-report_tokens --cost=<usd> [--input=N] [--output=N] [--cache-read=N] [--cache-write=N] [--agent=pi|claude-code|aider] [--tab=X] [--panel=Y] - Report token usage/cost
+report_tokens --cost=<usd> [--input=N] [--output=N] [--cache-read=N] [--cache-write=N] [--model=<name>] [--tab=X] - Report token usage/cost
+clear_tokens [--tab=X] - Clear token usage data
 ```
 
 ---
@@ -288,7 +274,7 @@ report_tokens --cost=<usd> [--input=N] [--output=N] [--cache-read=N] [--cache-wr
 
 ### Location in sidebar
 
-The widget sits in `VerticalTabsSidebar` between the `GeometryReader` (tab scroll area) and the existing footer (`SidebarDevFooter` / `UpdatePill`):
+Inserted into `VerticalTabsSidebar` between the `GeometryReader` (tab scroll area) and the existing footer:
 
 ```swift
 // In VerticalTabsSidebar body:
@@ -299,7 +285,6 @@ VStack(spacing: 0) {
 
     // NEW: Token cost widget
     TokenCostSidebarWidget()
-        .frame(maxWidth: .infinity, alignment: .leading)
 
     #if DEBUG
     SidebarDevFooter(updateViewModel: updateViewModel)
@@ -315,17 +300,34 @@ VStack(spacing: 0) {
 
 ### Widget design
 
+**Single workspace with data:**
 ```
 ┌─────────────────────────────┐
-│ Sidebar tabs                │
-│  ...                        │
-│                             │
-├─────────────────────────────┤  ← thin separator
-│ 💰 $0.42 · 105k tokens     │  ← total across all workspaces
-│    ws1: $0.25 (pi)          │  ← per-workspace breakdown
-│    ws2: $0.17 (pi)          │     (collapsed by default)
-├─────────────────────────────┤
-│ UpdatePill / DevFooter      │
+│  $0.42 · 105k tokens        │  ← compact single line
+│  claude-sonnet-4             │  ← model name (secondary text)
+└─────────────────────────────┘
+```
+
+**Multiple workspaces with data (collapsed, default):**
+```
+┌─────────────────────────────┐
+│ 💲 $0.67 · 210k tokens   ▸  │  ← aggregate total + chevron
+└─────────────────────────────┘
+```
+
+**Multiple workspaces with data (expanded):**
+```
+┌─────────────────────────────┐
+│ 💲 $0.67 · 210k tokens   ▾  │
+│   feature-work    $0.42     │
+│   code-review     $0.25     │
+└─────────────────────────────┘
+```
+
+**After agents finish (sticky $0.00 state):**
+```
+┌─────────────────────────────┐
+│  $0.00                       │  ← grayed out, not hidden
 └─────────────────────────────┘
 ```
 
@@ -339,10 +341,11 @@ import SwiftUI
 struct TokenCostSidebarWidget: View {
     @EnvironmentObject var tabManager: TabManager
     @State private var isExpanded = false
+    @State private var hasEverReportedTokens = false
 
     private var activeUsages: [(workspace: Workspace, usage: TokenUsageState)] {
         tabManager.tabs.compactMap { ws in
-            guard let usage = ws.aggregateTokenUsage ?? ws.tokenUsage else { return nil }
+            guard let usage = ws.tokenUsage else { return nil }
             return (workspace: ws, usage: usage)
         }
     }
@@ -355,87 +358,150 @@ struct TokenCostSidebarWidget: View {
         activeUsages.reduce(0) { $0 + $1.usage.totalTokens }
     }
 
+    private var shouldShow: Bool {
+        !activeUsages.isEmpty || hasEverReportedTokens
+    }
+
+    private var showExpandControls: Bool {
+        activeUsages.count > 1
+    }
+
     var body: some View {
-        if !activeUsages.isEmpty {
+        if shouldShow {
             VStack(alignment: .leading, spacing: 4) {
-                // Separator
                 Rectangle()
                     .fill(Color(nsColor: .separatorColor))
                     .frame(height: 1)
 
-                // Summary row (always visible)
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "dollarsign.circle")
-                            .font(.system(size: 10, weight: .medium))
-                        Text(formattedTotalCost)
-                            .font(.system(size: 11, weight: .semibold))
-                        Text("·")
-                            .foregroundColor(.secondary)
-                        Text(formattedTotalTokens)
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundColor(.secondary)
-                    }
+                if showExpandControls {
+                    multiWorkspaceSummary
+                } else {
+                    singleWorkspaceSummary
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(.primary)
 
-                // Per-workspace breakdown (expanded)
-                if isExpanded {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(activeUsages, id: \.workspace.id) { item in
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(agentColor(item.usage.agentType))
-                                    .frame(width: 6, height: 6)
-                                Text(item.workspace.title.prefix(20))
-                                    .font(.system(size: 10))
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                Spacer()
-                                Text(item.usage.formattedCost)
-                                    .font(.system(size: 10, weight: .medium))
-                                    .monospacedDigit()
-                            }
-                            .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(.leading, 4)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                if isExpanded && showExpandControls {
+                    perWorkspaceBreakdown
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
+            .onChange(of: activeUsages.count) { count in
+                if count > 0 { hasEverReportedTokens = true }
+            }
         }
     }
 
+    // MARK: - Single workspace (no chevron, shows model name)
+
+    private var singleWorkspaceSummary: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Image(systemName: "dollarsign.circle")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary)
+                Text(formattedTotalCost)
+                    .font(.system(size: 11, weight: .semibold))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(.default, value: totalCost)
+                if totalTokens > 0 {
+                    Text("·")
+                        .foregroundColor(.secondary)
+                    Text(formattedTotalTokens)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .foregroundColor(activeUsages.isEmpty ? .secondary : .primary)
+
+            if let model = activeUsages.first?.usage.displayModelName {
+                Text(model)
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Multi-workspace (chevron, expandable)
+
+    private var multiWorkspaceSummary: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isExpanded.toggle()
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "dollarsign.circle")
+                    .font(.system(size: 10, weight: .medium))
+                Text(formattedTotalCost)
+                    .font(.system(size: 11, weight: .semibold))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(.default, value: totalCost)
+                Text("·")
+                    .foregroundColor(.secondary)
+                Text(formattedTotalTokens)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(.primary)
+    }
+
+    private var perWorkspaceBreakdown: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(activeUsages, id: \.workspace.id) { item in
+                HStack(spacing: 4) {
+                    Text(item.workspace.title.prefix(20))
+                        .font(.system(size: 10))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer()
+                    if let model = item.usage.displayModelName {
+                        Text(model)
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary.opacity(0.7))
+                    }
+                    Text(item.usage.formattedCost)
+                        .font(.system(size: 10, weight: .medium))
+                        .monospacedDigit()
+                }
+                .foregroundColor(.secondary)
+            }
+        }
+        .padding(.leading, 4)
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    // MARK: - Formatting
+
     private var formattedTotalCost: String {
-        TokenUsageState(cost: totalCost).formattedCost
+        if activeUsages.isEmpty { return "$0.00" }
+        return TokenUsageState(cost: totalCost).formattedCost
     }
 
     private var formattedTotalTokens: String {
-        TokenUsageState(
-            input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
-            totalTokens: totalTokens, cost: 0
-        ).formattedTokens
+        TokenUsageState(totalTokens: totalTokens).formattedTokens
     }
+}
+```
 
-    private func agentColor(_ type: TokenUsageState.AgentType) -> Color {
-        switch type {
-        case .pi:        return .green
-        case .claudeCode: return .purple
-        case .aider:     return .orange
-        case .unknown:   return .gray
-        }
-    }
+### Sidebar height guard
+
+If the sidebar height is too small (e.g., many tabs in a short window), the widget should hide gracefully. The `GeometryReader` in `VerticalTabsSidebar` already fills available space; the widget's intrinsic height (~30–60px) is subtracted from the scroll area. If this causes layout issues, add:
+
+```swift
+GeometryReader { proxy in
+    // ...existing tab scroll...
+}
+
+if proxy.size.height > 200 { // min sidebar height threshold
+    TokenCostSidebarWidget()
 }
 ```
 
@@ -443,52 +509,34 @@ struct TokenCostSidebarWidget: View {
 
 ## 5. Implementation Phases
 
-### Phase 1 — MVP via `report_meta` (no Swift model changes)
+### Phase 1 — Ship it (single PR)
 
-**Goal:** Working end-to-end with zero cmux code changes. Uses existing sidebar metadata infrastructure.
+**Goal:** Working end-to-end: structured socket command, model, widget, pi extension.
 
-1. Create `cmux-token-reporter.ts` pi extension
-2. Extension uses `report_meta token_cost "$0.42" --icon="sf:dollarsign.circle" --priority=999`
-3. Token cost appears in existing sidebar metadata rows per workspace
-4. Ship as a pi skill or bundled extension
+| Step | File | Action |
+|------|------|--------|
+| 1 | `Sources/TokenUsage.swift` | **New** — `TokenUsageState` struct |
+| 2 | `Sources/Workspace.swift` | **Edit** — add `@Published var tokenUsage: TokenUsageState?` |
+| 3 | `Sources/TerminalController.swift` | **Edit** — add `report_tokens`, `clear_tokens` command handlers + help text |
+| 4 | `Sources/TokenCostSidebarWidget.swift` | **New** — SwiftUI widget |
+| 5 | `Sources/ContentView.swift` | **Edit** — insert widget into `VerticalTabsSidebar` body |
+| 6 | `skills/token-reporter/cmux-token-reporter.ts` | **New** — pi extension |
 
-**Effort:** ~2 hours (extension only)
+**Effort:** ~5 hours
 
-### Phase 2 — Dedicated `report_tokens` command + structured model
+### Phase 2 — Polish & multi-agent (future)
 
-**Goal:** Structured data model enables aggregated widget and richer UI.
+Deferred until Phase 1 is validated end-to-end:
 
-1. Add `TokenUsageState` struct (`Sources/TokenUsage.swift`)
-2. Add `tokenUsage` / `panelTokenUsage` to `Workspace`
-3. Add `report_tokens` socket command to `TerminalController.swift`
-4. Add `clear_tokens` and `list_tokens` commands
-5. Update pi extension to use `report_tokens`
-
-**Effort:** ~4 hours
-
-### Phase 3 — Dedicated sidebar widget
-
-**Goal:** Polished, always-visible widget at bottom of sidebar.
-
-1. Create `TokenCostSidebarWidget.swift`
-2. Insert into `VerticalTabsSidebar` layout
-3. Style to match sidebar aesthetic (blur, selection state awareness)
-4. Add expand/collapse animation for per-workspace breakdown
-5. Handle light/dark mode, active/inactive workspace colors
-
-**Effort:** ~4 hours
-
-### Phase 4 — Polish & additional agents
-
-1. Add `CMUX_SOCKET` environment variable injection for spawned terminals
-2. Auto-detect agent type from process tree / shell integration
-3. Add support for Claude Code (`~/.claude/projects/` cost tracking)
-4. Add support for Aider (parse output for cost lines)
-5. Add tooltip with full token breakdown (input/output/cache)
-6. Add session persistence for token stats (survive app restart)
-7. Add cost alerts / budget thresholds (configurable)
-
-**Effort:** ~8 hours
+- Per-panel token tracking (`panelTokenUsage: [UUID: TokenUsageState]`)
+- `list_tokens` socket command
+- Session persistence for token stats (survive app restart)
+- `CMUX_SOCKET` env var injection into spawned terminals
+- Claude Code support (parse `~/.claude/projects/` cost data or hook `claude-hook`)
+- Aider support (parse output for cost lines)
+- Tooltip with full token breakdown (input / output / cache read / cache write)
+- Cost alerts / budget thresholds (configurable via `@AppStorage`)
+- Widget visibility toggle setting
 
 ---
 
@@ -496,39 +544,100 @@ struct TokenCostSidebarWidget: View {
 
 | File | Action | Description |
 |------|--------|-------------|
-| `Sources/TokenUsage.swift` | **New** | `TokenUsageState` model |
-| `Sources/Workspace.swift` | Edit | Add `tokenUsage`, `panelTokenUsage` published properties |
-| `Sources/TerminalController.swift` | Edit | Add `report_tokens`, `clear_tokens`, `list_tokens` commands |
-| `Sources/ContentView.swift` | Edit | Insert `TokenCostSidebarWidget` into `VerticalTabsSidebar` |
+| `Sources/TokenUsage.swift` | **New** | `TokenUsageState` struct (Equatable, formatted cost/tokens/model) |
+| `Sources/Workspace.swift` | **Edit** | Add single `@Published var tokenUsage: TokenUsageState?` |
+| `Sources/TerminalController.swift` | **Edit** | Add `report_tokens` + `clear_tokens` commands |
+| `Sources/ContentView.swift` | **Edit** | Insert `TokenCostSidebarWidget` into `VerticalTabsSidebar` |
 | `Sources/TokenCostSidebarWidget.swift` | **New** | SwiftUI sidebar widget |
-| `skills/token-reporter/` | **New** | Pi extension for token reporting |
-| `features/token-cost/PLAN.md` | **New** | This plan |
+| `skills/token-reporter/cmux-token-reporter.ts` | **New** | Pi extension for token reporting |
+| `tests/test_token_reporting.py` | **New** | Socket command tests |
 
 ---
 
-## 7. Compatibility Notes
+## 7. Testing Strategy
 
-### Pi coding agent integration
+### Socket command tests (highest priority)
 
-- **RPC mode:** If cmux spawns pi via RPC (`pi --mode rpc`), cmux can call `get_session_stats` directly and skip the extension entirely. This is the cleanest path for deep integration.
-- **Interactive mode:** The extension approach works when pi runs interactively in a terminal pane.
-- **Socket discovery:** Pi extensions run in the same process as the agent, which runs inside a cmux terminal. The `CMUX_SOCKET` env var (injected by cmux into spawned shells) is the most reliable discovery mechanism.
+Add `tests/test_token_reporting.py` following the `test_ctrl_socket.py` pattern. Run on the VM:
 
-### Threading policy compliance
+```python
+def test_report_tokens_basic():
+    """report_tokens stores structured data and returns OK"""
+    result = send_socket("report_tokens --cost=0.42 --input=50000 --output=10000")
+    assert result == "OK"
 
-- `report_tokens` follows the socket command threading policy: parse/validate off-main, coalesce off-main, `DispatchQueue.main.async` only for the `@Published` property mutation.
-- No `DispatchQueue.main.sync` on the hot path.
+def test_report_tokens_missing_cost():
+    """report_tokens without --cost returns error"""
+    result = send_socket("report_tokens --input=50000")
+    assert "ERROR" in result
 
-### Socket focus policy compliance
+def test_report_tokens_with_model():
+    """report_tokens with --model stores model name"""
+    result = send_socket("report_tokens --cost=0.42 --input=50000 --output=10000 --model=claude-sonnet-4-20250514")
+    assert result == "OK"
 
-- `report_tokens` is a telemetry command — no app activation, no window raising, no focus mutation.
+def test_clear_tokens():
+    """clear_tokens resets token state"""
+    send_socket("report_tokens --cost=0.42 --input=50000 --output=10000")
+    result = send_socket("clear_tokens")
+    assert result == "OK"
+```
+
+Run via:
+```bash
+ssh cmux-vm '... && python3 tests/test_token_reporting.py'
+```
+
+### Integration test
+
+Manual, with a tagged Debug build:
+
+```bash
+./scripts/reload.sh --tag token-cost
+# In another terminal:
+tail -f /tmp/cmux-debug-token-cost.log | grep token
+# Start pi in a cmux pane, make queries, verify widget updates
+```
+
+### What NOT to test
+
+- SwiftUI widget rendering (too simple; visual check during debug build)
+- Per-panel aggregation (not building it)
+- Session persistence (deferred)
+- Multi-agent scenarios (deferred)
 
 ---
 
-## 8. Open Questions
+## 8. Compatibility & Policy Compliance
 
-1. **Widget visibility toggle** — Should there be a setting to hide the token cost widget? Probably yes, via `@AppStorage`.
-2. **Historical cost tracking** — Should we persist cumulative cost across sessions/app restarts? Nice-to-have for Phase 4.
-3. **Multi-window** — Each window has its own sidebar; the widget should show costs for workspaces visible in that window only (follows existing TabManager scoping).
-4. **Currency formatting** — Always USD? Or respect locale? Start with USD since all LLM providers price in USD.
-5. **RPC vs extension** — For deep pi integration, should cmux spawn pi in RPC mode and use `get_session_stats` directly? This bypasses the extension but requires cmux to manage the pi lifecycle.
+### Threading policy
+
+- `report_tokens` is a telemetry command: parse/validate off-main, `DispatchQueue.main.async` only for the `@Published` mutation.
+- No `DispatchQueue.main.sync` anywhere on the hot path.
+
+### Socket focus policy
+
+- `report_tokens` and `clear_tokens` are pure data commands — no app activation, no window raising, no focus mutation.
+
+### SwiftUI diffing
+
+- `TokenUsageState` conforms to `Equatable` — SwiftUI skips re-renders when the value hasn't changed.
+- Extension debounces at $0.001 delta — prevents unnecessary socket traffic.
+- Single `@Published` property (not per-panel dictionary) — minimal observation overhead.
+
+---
+
+## 9. Resolved Questions
+
+| Question | Decision |
+|----------|----------|
+| Skip Phase 1 (`report_meta`)? | **Yes.** Throwaway work with zero reuse. |
+| Per-panel tracking? | **No for v1.** Agents report per-session. Add later if needed. |
+| `AgentType` enum? | **No.** Use `--model=` string instead. Model name is more useful. |
+| Extension uses `nc -U`? | **No.** Use Node `net.connect()` directly. No shell escaping, no subprocess. |
+| Widget visibility when no data? | **Sticky.** Show grayed `$0.00` after first report, don't disappear. |
+| Expand/collapse always? | **Only when `activeUsages.count > 1`.** Single workspace = no chevron. |
+| Cost-per-minute rate? | **No.** Noisy, anxiety-inducing, not actionable. |
+| Currency? | **USD always.** All LLM providers price in USD. |
+| Cost animation? | **Yes.** `.contentTransition(.numericText())` on macOS 14+. |
+| Sidebar min-height guard? | **Yes.** Hide widget if sidebar height < 200px. |
