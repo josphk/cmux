@@ -422,6 +422,9 @@ final class FileDropOverlayView: NSView {
     // file-drop, bonsplit tab drags, and sidebar tab reorder drags cannot conflict.
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        // Short-circuit re-entrant calls caused by debugTopHitViewForCurrentEvent
+        // toggling isHidden, which triggers a new display pass and hitTest.
+        guard !isPerformingDebugHitTest else { return nil }
         let pb = NSPasteboard(name: .drag)
         let eventType = NSApp.currentEvent?.type
         let shouldCapture = DragOverlayRoutingPolicy.shouldCaptureFileDropOverlay(
@@ -626,15 +629,22 @@ final class FileDropOverlayView: NSView {
         return nil
     }
 
+    private var isPerformingDebugHitTest = false
+
     private func debugTopHitViewForCurrentEvent() -> String {
+        guard !isPerformingDebugHitTest else { return "(reentrant)" }
         guard let window,
               let currentEvent = NSApp.currentEvent,
               let contentView = window.contentView,
               let themeFrame = contentView.superview else { return "-" }
 
         let pointInTheme = themeFrame.convert(currentEvent.locationInWindow, from: nil)
+        isPerformingDebugHitTest = true
         isHidden = true
-        defer { isHidden = false }
+        defer {
+            isHidden = false
+            isPerformingDebugHitTest = false
+        }
 
         guard let hit = themeFrame.hitTest(pointInTheme) else { return "nil" }
         var chain: [String] = []
@@ -720,13 +730,20 @@ final class FileDropOverlayView: NSView {
             || eventType == .otherMouseDragged
         guard shouldCapture || isDragEvent || hasRelevantDragTypes(pasteboardTypes) else { return }
 
-        let signature = "\(shouldCapture ? 1 : 0)|\(debugEventName(eventType))|\(debugPasteboardTypes(pasteboardTypes))"
+        // Coalesce non-drag event types in the signature so rapidly alternating
+        // cursorUpdate/mouseEntered events don't defeat deduplication.
+        let eventKey = isDragEvent ? debugEventName(eventType) : (shouldCapture ? debugEventName(eventType) : "passive")
+        let signature = "\(shouldCapture ? 1 : 0)|\(eventKey)|\(debugPasteboardTypes(pasteboardTypes))"
         guard lastHitTestLogSignature != signature else { return }
         lastHitTestLogSignature = signature
+
+        // Only call debugTopHitViewForCurrentEvent() when capturing — it toggles
+        // isHidden which generates new cursor events and can cause event storms.
+        let topHit = shouldCapture ? debugTopHitViewForCurrentEvent() : "(skipped)"
         dlog(
             "overlay.fileDrop.hitTest capture=\(shouldCapture ? 1 : 0) " +
             "event=\(debugEventName(eventType)) " +
-            "topHit=\(debugTopHitViewForCurrentEvent()) " +
+            "topHit=\(topHit) " +
             "types=\(debugPasteboardTypes(pasteboardTypes))"
         )
     }

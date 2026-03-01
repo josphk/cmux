@@ -352,9 +352,15 @@ final class WindowTerminalHostView: NSView {
         guard passThrough || hasRelevantTypes else { return }
 
         let targetClass = hitView.map { NSStringFromClass(type(of: $0)) } ?? "nil"
+        let isDragEvent = eventType == .leftMouseDragged
+            || eventType == .rightMouseDragged
+            || eventType == .otherMouseDragged
+        // Coalesce non-drag event types so rapidly alternating cursorUpdate/mouseEntered
+        // events don't defeat deduplication and cause event storms.
+        let eventKey = isDragEvent ? debugEventName(eventType) : (passThrough ? debugEventName(eventType) : "passive")
         let signature = [
             passThrough ? "1" : "0",
-            debugEventName(eventType),
+            eventKey,
             debugPasteboardTypes(pasteboardTypes),
             targetClass,
         ].joined(separator: "|")
