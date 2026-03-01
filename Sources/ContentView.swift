@@ -422,6 +422,9 @@ final class FileDropOverlayView: NSView {
     // file-drop, bonsplit tab drags, and sidebar tab reorder drags cannot conflict.
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        // Short-circuit re-entrant calls caused by debugTopHitViewForCurrentEvent
+        // toggling isHidden, which triggers a new display pass and hitTest.
+        guard !isPerformingDebugHitTest else { return nil }
         let pb = NSPasteboard(name: .drag)
         let eventType = NSApp.currentEvent?.type
         let shouldCapture = DragOverlayRoutingPolicy.shouldCaptureFileDropOverlay(
@@ -626,15 +629,22 @@ final class FileDropOverlayView: NSView {
         return nil
     }
 
+    private var isPerformingDebugHitTest = false
+
     private func debugTopHitViewForCurrentEvent() -> String {
+        guard !isPerformingDebugHitTest else { return "(reentrant)" }
         guard let window,
               let currentEvent = NSApp.currentEvent,
               let contentView = window.contentView,
               let themeFrame = contentView.superview else { return "-" }
 
         let pointInTheme = themeFrame.convert(currentEvent.locationInWindow, from: nil)
+        isPerformingDebugHitTest = true
         isHidden = true
-        defer { isHidden = false }
+        defer {
+            isHidden = false
+            isPerformingDebugHitTest = false
+        }
 
         guard let hit = themeFrame.hitTest(pointInTheme) else { return "nil" }
         var chain: [String] = []
