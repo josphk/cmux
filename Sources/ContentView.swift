@@ -730,13 +730,20 @@ final class FileDropOverlayView: NSView {
             || eventType == .otherMouseDragged
         guard shouldCapture || isDragEvent || hasRelevantDragTypes(pasteboardTypes) else { return }
 
-        let signature = "\(shouldCapture ? 1 : 0)|\(debugEventName(eventType))|\(debugPasteboardTypes(pasteboardTypes))"
+        // Coalesce non-drag event types in the signature so rapidly alternating
+        // cursorUpdate/mouseEntered events don't defeat deduplication.
+        let eventKey = isDragEvent ? debugEventName(eventType) : (shouldCapture ? debugEventName(eventType) : "passive")
+        let signature = "\(shouldCapture ? 1 : 0)|\(eventKey)|\(debugPasteboardTypes(pasteboardTypes))"
         guard lastHitTestLogSignature != signature else { return }
         lastHitTestLogSignature = signature
+
+        // Only call debugTopHitViewForCurrentEvent() when capturing — it toggles
+        // isHidden which generates new cursor events and can cause event storms.
+        let topHit = shouldCapture ? debugTopHitViewForCurrentEvent() : "(skipped)"
         dlog(
             "overlay.fileDrop.hitTest capture=\(shouldCapture ? 1 : 0) " +
             "event=\(debugEventName(eventType)) " +
-            "topHit=\(debugTopHitViewForCurrentEvent()) " +
+            "topHit=\(topHit) " +
             "types=\(debugPasteboardTypes(pasteboardTypes))"
         )
     }
