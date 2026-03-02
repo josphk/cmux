@@ -10,16 +10,20 @@ struct TokenCostSidebarWidget: View {
     /// Flat list of all agent entries across all workspaces.
     private var agentEntries: [(workspace: Workspace, surfaceId: String, usage: TokenUsageState)] {
         _ = tabManager.tokenUsageGeneration
-        var result: [(Workspace, String, TokenUsageState)] = []
+        var active: [(Workspace, String, TokenUsageState)] = []
+        var dead: [(Workspace, String, TokenUsageState)] = []
         for ws in tabManager.tabs {
             for (surfaceId, usage) in ws.tokenUsageByAgent {
-                result.append((ws, surfaceId, usage))
+                if usage.isActive {
+                    active.append((ws, surfaceId, usage))
+                } else {
+                    dead.append((ws, surfaceId, usage))
+                }
             }
         }
-        result.sort { (a: (Workspace, String, TokenUsageState), b: (Workspace, String, TokenUsageState)) in
-            a.2.effectiveCost > b.2.effectiveCost
-        }
-        return result
+        active.sort { $0.2.effectiveCost > $1.2.effectiveCost }
+        dead.sort { $0.2.effectiveCost > $1.2.effectiveCost }
+        return active + dead
     }
 
     private var totalCost: Double {
