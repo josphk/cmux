@@ -8,15 +8,21 @@ struct TokenUsageState: Equatable {
     var cacheRead: Int = 0
     var cacheWrite: Int = 0
     var totalTokens: Int = 0
-    var cost: Double = 0.0           // USD
+    var cost: Double = 0.0           // USD (current session)
+    var costOffset: Double = 0.0     // USD accumulated from previous sessions in this pane
     var model: String?               // e.g. "claude-sonnet-4-20250514"
+    var isActive: Bool = true
     var lastUpdated: Date = Date()
 
+    /// Total cost including previous sessions in this pane.
+    var effectiveCost: Double { cost + costOffset }
+
     var formattedCost: String {
-        if cost < 0.01 {
-            return String(format: "$%.4f", cost)
+        let total = effectiveCost
+        if total < 0.01 {
+            return String(format: "$%.4f", total)
         } else {
-            return String(format: "$%.2f", cost)
+            return String(format: "$%.2f", total)
         }
     }
 

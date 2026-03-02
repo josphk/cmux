@@ -955,6 +955,9 @@ class TerminalController {
         case "clear_tokens":
             return handleClearTokens(args)
 
+        case "deactivate_tokens":
+            return handleDeactivateTokens(args)
+
         case "report_tty":
             return reportTTY(args)
 
@@ -12198,11 +12201,21 @@ class TerminalController {
         if let v = parsed.options["cache-write"], let n = Int(v) { state.cacheWrite = n }
         if let m = parsed.options["model"], !m.isEmpty { state.model = m }
         state.totalTokens = state.input + state.output + state.cacheRead + state.cacheWrite
+        state.isActive = true
 
         // Parse off-main, async-mutate on main (threading policy for telemetry).
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             guard let tab = self.resolveTabForReport(args) else { return }
+            if let existing = tab.tokenUsageByAgent[surfaceKey] {
+                if !existing.isActive {
+                    // Reactivating a dead agent: carry forward all accumulated cost
+                    state.costOffset = existing.effectiveCost
+                } else {
+                    // Updating an active agent: preserve existing offset
+                    state.costOffset = existing.costOffset
+                }
+            }
             tab.tokenUsageByAgent[surfaceKey] = state
             self.tabManager?.tokenUsageGeneration &+= 1
         }
@@ -12220,6 +12233,22 @@ class TerminalController {
                 tab.tokenUsageByAgent.removeValue(forKey: key)
             } else {
                 tab.tokenUsageByAgent.removeAll()
+            }
+            self.tabManager?.tokenUsageGeneration &+= 1
+        }
+        return "OK"
+    }
+
+    private func handleDeactivateTokens(_ args: String) -> String {
+        let parsed = parseOptions(args)
+        guard let surfaceKey = parsed.options["surface"], !surfaceKey.isEmpty else {
+            return "ERROR: --surface required"
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard let tab = self.resolveTabForReport(args) else { return }
+            if tab.tokenUsageByAgent[surfaceKey] != nil {
+                tab.tokenUsageByAgent[surfaceKey]?.isActive = false
             }
             self.tabManager?.tokenUsageGeneration &+= 1
         }

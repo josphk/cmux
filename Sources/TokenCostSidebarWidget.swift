@@ -20,11 +20,15 @@ struct TokenCostSidebarWidget: View {
     }
 
     private var totalCost: Double {
-        agentEntries.reduce(0) { $0 + $1.usage.cost }
+        agentEntries.reduce(0) { $0 + $1.usage.effectiveCost }
     }
 
     private var totalTokens: Int {
         agentEntries.reduce(0) { $0 + $1.usage.totalTokens }
+    }
+
+    private var activeCount: Int {
+        agentEntries.filter(\.usage.isActive).count
     }
 
     private var formattedTotalCost: String {
@@ -106,9 +110,9 @@ struct TokenCostSidebarWidget: View {
                         workspaceTitle: entry.workspace.title,
                         usage: entry.usage,
                         hoverSuppressed: hoverSuppressed,
-                        onTap: {
+                        onTap: entry.usage.isActive ? {
                             focusAgent(workspace: entry.workspace, surfaceId: entry.surfaceId)
-                        }
+                        } : nil
                     )
                 }
             }
@@ -124,11 +128,9 @@ struct TokenCostSidebarWidget: View {
 
     private func focusAgent(workspace: Workspace, surfaceId: String) {
         guard let surfaceUUID = UUID(uuidString: surfaceId) else { return }
-        // Select the workspace if it's not already selected
         if tabManager.selectedTabId != workspace.id {
             tabManager.selectWorkspace(workspace)
         }
-        // Focus the specific pane
         tabManager.focusSurface(tabId: workspace.id, surfaceId: surfaceUUID)
     }
 }
@@ -139,12 +141,24 @@ private struct TokenCostAgentRow: View {
     let workspaceTitle: String
     let usage: TokenUsageState
     var hoverSuppressed: Bool = false
-    var onTap: () -> Void = {}
+    var onTap: (() -> Void)?
 
     @State private var isHovered = false
 
+    private var isInteractive: Bool { onTap != nil }
+    private var showHover: Bool { isHovered && !hoverSuppressed && isInteractive }
+
     var body: some View {
         HStack(spacing: 4) {
+            // Status dot: green = active, gray outline = dead
+            Circle()
+                .fill(usage.isActive ? Color.green : Color.clear)
+                .overlay(
+                    Circle()
+                        .strokeBorder(usage.isActive ? Color.clear : Color.gray.opacity(0.5), lineWidth: 1)
+                )
+                .frame(width: 6, height: 6)
+
             Text(workspaceTitle)
                 .font(.system(size: 9))
                 .lineLimit(1)
@@ -163,23 +177,23 @@ private struct TokenCostAgentRow: View {
                 .font(.system(size: 10, weight: .medium))
                 .monospacedDigit()
                 .contentTransition(.numericText())
-                .animation(.default, value: usage.cost)
+                .animation(.default, value: usage.effectiveCost)
         }
-        .foregroundStyle(isHovered && !hoverSuppressed ? .primary : .secondary)
+        .foregroundStyle(showHover ? .primary : .secondary)
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color(nsColor: .white).opacity(isHovered && !hoverSuppressed ? 0.06 : 0))
+                .fill(Color(nsColor: .white).opacity(showHover ? 0.06 : 0))
         )
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
-        .animation(.easeInOut(duration: 0.15), value: isHovered)
+        .animation(.easeInOut(duration: 0.15), value: showHover)
         .onHover { hovering in
-            isHovered = hovering
+            isHovered = isInteractive ? hovering : false
         }
         .onTapGesture {
-            onTap()
+            onTap?()
         }
     }
 }

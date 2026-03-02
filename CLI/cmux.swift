@@ -1461,6 +1461,18 @@ struct CMUXCLI {
             let response = try sendV1Command(socketCmd, client: client)
             print(response)
 
+        case "deactivate-tokens":
+            let (surfaceFlag, r1) = parseOption(commandArgs, name: "--surface")
+            let (wsFlag, _) = parseOption(r1, name: "--workspace")
+            let surface = surfaceFlag ?? ProcessInfo.processInfo.environment["CMUX_SURFACE_ID"]
+            guard let surface, !surface.isEmpty else {
+                throw CLIError(message: "deactivate-tokens requires --surface=<id> or $CMUX_SURFACE_ID")
+            }
+            let workspaceArg = wsFlag ?? (windowId == nil ? ProcessInfo.processInfo.environment["CMUX_WORKSPACE_ID"] : nil)
+            let wsId = try resolveWorkspaceId(workspaceArg, client: client)
+            let response = try sendV1Command("deactivate_tokens --surface=\(socketQuote(surface)) --tab=\(wsId)", client: client)
+            print(response)
+
         case "set-app-focus":
             guard let value = commandArgs.first else { throw CLIError(message: "set-app-focus requires a value") }
             let response = try sendV1Command("set_app_focus \(value)", client: client)
@@ -4472,6 +4484,22 @@ struct CMUXCLI {
               cmux report-tokens --cost 1.23 --surface abc123 --workspace workspace:2
             """
 
+        case "deactivate-tokens":
+            return """
+            Usage: cmux deactivate-tokens [flags]
+
+            Mark an agent as inactive (dead). The line item stays in the widget for
+            accounting but becomes non-interactive (gray dot). If a new agent starts
+            in the same pane, it reactivates and costs accumulate.
+
+            Flags:
+              --surface <id>         Surface/pane ID (default: $CMUX_SURFACE_ID).
+              --workspace <id|ref>   Target workspace (default: $CMUX_WORKSPACE_ID)
+
+            Example:
+              cmux deactivate-tokens
+            """
+
         case "clear-tokens":
             return """
             Usage: cmux clear-tokens [flags]
@@ -6472,6 +6500,7 @@ struct CMUXCLI {
           list-log [--limit <n>] [--workspace <id|ref>]
           sidebar-state [--workspace <id|ref>]
           report-tokens --cost <usd> [--input <n>] [--output <n>] [--cache-read <n>] [--cache-write <n>] [--model <name>] [--surface <id>] [--workspace <id|ref>]
+          deactivate-tokens [--surface <id>] [--workspace <id|ref>]
           clear-tokens [--surface <id>] [--workspace <id|ref>]
 
           set-app-focus <active|inactive|clear>
