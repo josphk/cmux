@@ -91,6 +91,7 @@ struct TokenCostSidebarWidget: View {
                 }
             }
             .buttonStyle(.plain)
+            .contentShape(Rectangle())
             .foregroundStyle(totalCost > 0 ? .primary : .secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
