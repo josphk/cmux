@@ -162,8 +162,11 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 
 	// ── Events ────────────────────────────────────────────────────────────
 
-	pi.on("session_start", async () => {
+	pi.on("session_start", async (_event, ctx) => {
 		startWatching();
+		const theme = ctx.ui.theme;
+		const dot = theme.fg("success", "●");
+		ctx.ui.setStatus("browser-bridge", dot + theme.fg("dim", " Browser"));
 	});
 
 	pi.on("session_shutdown", async () => {

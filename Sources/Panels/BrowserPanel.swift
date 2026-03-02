@@ -1606,12 +1606,14 @@ final class BrowserPanel: Panel, ObservableObject {
         return ""
     }()
 
+    /// Base directory for bridge files. Uses /tmp/ (not NSTemporaryDirectory) to match
+    /// the pi extension which also writes to /tmp/cmux-browser-bridge/.
+    private static let bridgeBaseDir = URL(fileURLWithPath: "/tmp/cmux-browser-bridge", isDirectory: true)
+
     /// File URL for the JSONL bridge file, scoped by the target terminal surface ID.
     /// Each pi extension instance watches only its own surface's file.
     var bridgeFileURL: URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent("cmux-browser-bridge")
-            .appendingPathComponent("\(inspectionTargetSurfaceId).jsonl")
+        Self.bridgeBaseDir.appendingPathComponent("\(inspectionTargetSurfaceId).jsonl")
     }
 
     /// Enable inspection mode, delivering picks to `targetSurfaceId`.
@@ -1630,8 +1632,7 @@ final class BrowserPanel: Panel, ObservableObject {
         }
 
         // Check if an agent is actually listening on the target surface.
-        let presenceFile = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cmux-browser-bridge")
+        let presenceFile = Self.bridgeBaseDir
             .appendingPathComponent("\(inspectionTargetSurfaceId).listening")
         guard FileManager.default.fileExists(atPath: presenceFile.path) else {
             #if DEBUG

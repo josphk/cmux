@@ -7906,9 +7906,8 @@ class TerminalController {
         }
 
         // Build the bridge file path scoped to the TARGET terminal surface.
-        let bridgeFile = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cmux-browser-bridge")
-            .appendingPathComponent("\(targetSurfaceId).jsonl")
+        let bridgeDir = URL(fileURLWithPath: "/tmp/cmux-browser-bridge", isDirectory: true)
+        let bridgeFile = bridgeDir.appendingPathComponent("\(targetSurfaceId).jsonl")
 
         // Ensure the bridge directory exists.
         try? FileManager.default.createDirectory(
