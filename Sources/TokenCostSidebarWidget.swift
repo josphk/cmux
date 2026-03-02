@@ -12,9 +12,12 @@ struct TokenCostSidebarWidget: View {
         _ = tabManager.tokenUsageGeneration
         var result: [(Workspace, String, TokenUsageState)] = []
         for ws in tabManager.tabs {
-            for (surfaceId, usage) in ws.tokenUsageByAgent.sorted(by: { $0.key < $1.key }) {
+            for (surfaceId, usage) in ws.tokenUsageByAgent {
                 result.append((ws, surfaceId, usage))
             }
+        }
+        result.sort { (a: (Workspace, String, TokenUsageState), b: (Workspace, String, TokenUsageState)) in
+            a.2.effectiveCost > b.2.effectiveCost
         }
         return result
     }
@@ -116,6 +119,7 @@ struct TokenCostSidebarWidget: View {
                     )
                 }
             }
+            .animation(.easeInOut(duration: 0.3), value: entries.map(\.surfaceId))
             .padding(.bottom, isExpanded ? 6 : 0)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxHeight: isExpanded ? 500 : 0, alignment: .top)
