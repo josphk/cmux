@@ -115,6 +115,9 @@ struct TokenCostSidebarWidget: View {
                         hoverSuppressed: hoverSuppressed,
                         onTap: entry.usage.isActive ? {
                             focusAgent(workspace: entry.workspace, surfaceId: entry.surfaceId)
+                        } : nil,
+                        onRemove: !entry.usage.isActive ? {
+                            removeAgent(workspace: entry.workspace, surfaceId: entry.surfaceId)
                         } : nil
                     )
                 }
@@ -137,6 +140,11 @@ struct TokenCostSidebarWidget: View {
         }
         tabManager.focusSurface(tabId: workspace.id, surfaceId: surfaceUUID)
     }
+
+    private func removeAgent(workspace: Workspace, surfaceId: String) {
+        workspace.tokenUsageByAgent.removeValue(forKey: surfaceId)
+        tabManager.tokenUsageGeneration &+= 1
+    }
 }
 
 // MARK: - Per-agent row
@@ -146,23 +154,39 @@ private struct TokenCostAgentRow: View {
     let usage: TokenUsageState
     var hoverSuppressed: Bool = false
     var onTap: (() -> Void)?
+    var onRemove: (() -> Void)?
 
     @State private var isHovered = false
 
     private var isInteractive: Bool { onTap != nil }
     private var showHover: Bool { isHovered && !hoverSuppressed && isInteractive }
+    private var showRemoveHover: Bool { isHovered && !hoverSuppressed && onRemove != nil }
 
     var body: some View {
         HStack(spacing: 4) {
-            // Status dot: green = active, gray outline = dead
-            Circle()
-                .fill(usage.isActive ? Color.green : Color.clear)
-                .overlay(
+            // Status dot: green = active, gray outline = dead (becomes X on hover)
+            ZStack {
+                if usage.isActive {
                     Circle()
-                        .strokeBorder(usage.isActive ? Color.clear : Color.gray.opacity(0.5), lineWidth: 1)
-                )
-                .frame(width: 6, height: 6)
-                .padding(.trailing, 2)
+                        .fill(Color.green)
+                        .frame(width: 6, height: 6)
+                } else if showRemoveHover {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 10, height: 10)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            onRemove?()
+                        }
+                } else {
+                    Circle()
+                        .strokeBorder(Color.gray.opacity(0.5), lineWidth: 1)
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .frame(width: 10, height: 10)
+            .animation(.easeInOut(duration: 0.12), value: showRemoveHover)
 
             Text(workspaceTitle)
                 .font(.system(size: 9))
@@ -183,19 +207,20 @@ private struct TokenCostAgentRow: View {
                 .monospacedDigit()
                 .contentTransition(.numericText())
                 .animation(.default, value: usage.effectiveCost)
+
         }
         .foregroundStyle(showHover ? .primary : .secondary)
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color(nsColor: .white).opacity(showHover ? 0.06 : 0))
+                .fill(Color(nsColor: .white).opacity(showHover || showRemoveHover ? 0.06 : 0))
         )
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
-        .animation(.easeInOut(duration: 0.15), value: showHover)
+        .animation(.easeInOut(duration: 0.15), value: isHovered)
         .onHover { hovering in
-            isHovered = isInteractive ? hovering : false
+            isHovered = (isInteractive || onRemove != nil) ? hovering : false
         }
         .onTapGesture {
             onTap?()

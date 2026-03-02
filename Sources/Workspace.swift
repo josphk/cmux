@@ -3750,6 +3750,12 @@ extension Workspace: BonsplitDelegate {
 
         panels.removeValue(forKey: panelId)
         surfaceIdToPanelId.removeValue(forKey: tabId)
+        // Mark token usage as dead when a pane is closed
+        let surfaceKey = panelId.uuidString
+        if tokenUsageByAgent[surfaceKey] != nil {
+            tokenUsageByAgent[surfaceKey]?.isActive = false
+            NotificationCenter.default.post(name: .tokenUsageDidChange, object: nil)
+        }
         panelDirectories.removeValue(forKey: panelId)
         panelGitBranches.removeValue(forKey: panelId)
         panelPullRequests.removeValue(forKey: panelId)

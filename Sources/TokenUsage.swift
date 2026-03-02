@@ -1,5 +1,9 @@
 import Foundation
 
+extension Notification.Name {
+    static let tokenUsageDidChange = Notification.Name("tokenUsageDidChange")
+}
+
 /// Structured token usage and cost state reported by coding agents (pi, Claude Code, etc.)
 /// via the `report_tokens` socket command. Stored on `Workspace.tokenUsage`.
 struct TokenUsageState: Equatable {

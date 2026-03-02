@@ -677,6 +677,16 @@ class TabManager: ObservableObject {
             }
         })
 
+        observers.append(NotificationCenter.default.addObserver(
+            forName: .tokenUsageDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { [weak self] in
+                self?.tokenUsageGeneration &+= 1
+            }
+        })
+
 #if DEBUG
         setupUITestFocusShortcutsIfNeeded()
         setupSplitCloseRightUITestIfNeeded()
