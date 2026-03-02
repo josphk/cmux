@@ -585,24 +585,19 @@ struct BrowserPanelView: View {
 
     private var inspectionPickerButton: some View {
         let connected = panel.isInspectionModeActive || hasConnectedAgent
-        return ZStack {
-            Button(action: {
-                toggleInspectionMode()
-            }) {
-                Image(systemName: "scope")
-                    .symbolRenderingMode(.monochrome)
-                    .cmuxFlatSymbolColorRendering()
-                    .font(.system(size: devToolsButtonIconSize, weight: panel.isInspectionModeActive ? .bold : .medium))
-                    .foregroundStyle(panel.isInspectionModeActive ? Color.accentColor : connected ? devToolsColorOption.color : devToolsColorOption.color.opacity(0.3))
-                    .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
-            }
-            .buttonStyle(OmnibarAddressButtonStyle())
-            .disabled(!connected)
-            .allowsHitTesting(connected)
+        return Button(action: {
+            toggleInspectionMode()
+        }) {
+            Image(systemName: "scope")
+                .symbolRenderingMode(.monochrome)
+                .cmuxFlatSymbolColorRendering()
+                .font(.system(size: devToolsButtonIconSize, weight: panel.isInspectionModeActive ? .bold : .medium))
+                .foregroundStyle(panel.isInspectionModeActive ? Color.accentColor : connected ? devToolsColorOption.color : devToolsColorOption.color.opacity(0.3))
+                .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
         }
+        .buttonStyle(OmnibarAddressButtonStyle())
+        .disabled(!connected)
         .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
-        .contentShape(Rectangle())
-        .help(connected ? "Pick element for agent chat (⌘⇧I)" : "No connected agents")
         .accessibilityIdentifier("BrowserInspectionPickerButton")
     }
 
