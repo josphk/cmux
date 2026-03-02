@@ -23,6 +23,17 @@ final class BrowserBridgeWatcher: ObservableObject {
         stopWatching()
     }
 
+    /// Write the active target surface ID so extensions know which agent receives picks.
+    func setActiveTarget(_ surfaceId: UUID) {
+        let targetFile = URL(fileURLWithPath: Self.bridgeDir).appendingPathComponent("active-target")
+        try? FileManager.default.createDirectory(
+            atPath: Self.bridgeDir,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        try? surfaceId.uuidString.write(to: targetFile, atomically: true, encoding: .utf8)
+    }
+
     /// Scan the directory for `.listening` files and update the published set.
     private func scan() {
         let dir = Self.bridgeDir

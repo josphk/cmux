@@ -171,27 +171,61 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 
 	}
 
+	// ── Active target tracking ─────────────────────────────────────────────
+
+	const activeTargetFile = path.join(BRIDGE_DIR, "active-target");
+	let targetWatcher: fs.FSWatcher | null = null;
+	let uiRef: { setStatus: (key: string, text: string | undefined) => void } | null = null;
+
+	function checkActiveTarget(): void {
+		if (!uiRef) return;
+		try {
+			const target = fs.readFileSync(activeTargetFile, "utf-8").trim();
+			if (target === surfaceId) {
+				uiRef.setStatus("browser-bridge", "● Ready for browser picks");
+			} else {
+				uiRef.setStatus("browser-bridge", undefined);
+			}
+		} catch {
+			// File doesn't exist yet — clear status.
+			uiRef.setStatus("browser-bridge", undefined);
+		}
+	}
+
+	function startTargetWatcher(): void {
+		if (targetWatcher) return;
+		try {
+			targetWatcher = fs.watch(BRIDGE_DIR, (_eventType, filename) => {
+				if (filename === "active-target") checkActiveTarget();
+			});
+			targetWatcher.on("error", () => {});
+		} catch {}
+	}
+
 	// ── Events ────────────────────────────────────────────────────────────
 
 	// Start watching immediately (extension may load after session_start fires).
 	startWatching();
+	startTargetWatcher();
 
 	pi.on("session_start", async (_event, ctx) => {
 		startWatching();
-		ctx.ui.setStatus("browser-bridge", "● Browser");
+		uiRef = ctx.ui;
+		checkActiveTarget();
+		startTargetWatcher();
 	});
 
-	// Set status on first turn if session_start was missed.
-	let statusSet = false;
+	// Capture ctx on first turn if session_start was missed.
 	pi.on("turn_start", async (_event, ctx) => {
-		if (!statusSet) {
-			statusSet = true;
-			ctx.ui.setStatus("browser-bridge", "● Browser");
+		if (!uiRef) {
+			uiRef = ctx.ui;
+			checkActiveTarget();
 		}
 	});
 
 	pi.on("session_shutdown", async () => {
 		stopWatching();
+		if (targetWatcher) { targetWatcher.close(); targetWatcher = null; }
 	});
 
 	// ── Tool: browser_inspect (Flow B) ────────────────────────────────────
