@@ -68,8 +68,8 @@ struct TokenCostSidebarWidget: View {
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                     }
+                    Spacer()
                     if agentCount > 0 {
-                        Spacer()
                         Text("\(agentCount)")
                             .font(.system(size: 9, weight: .medium))
                             .monospacedDigit()
@@ -83,7 +83,6 @@ struct TokenCostSidebarWidget: View {
                             .contentTransition(.numericText())
                             .animation(.default, value: agentCount)
                     }
-                    Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.tertiary)
