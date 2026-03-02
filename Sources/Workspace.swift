@@ -970,6 +970,18 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var panelPullRequests: [UUID: SidebarPullRequestState] = [:]
     @Published var surfaceListeningPorts: [UUID: [Int]] = [:]
     @Published var listeningPorts: [Int] = []
+    /// Token usage keyed by surface (pane) ID. Multiple agents can run in different panes.
+    var tokenUsageByAgent: [String: TokenUsageState] = [:]
+
+    /// Aggregate cost across all agents in this workspace.
+    var totalTokenCost: Double {
+        tokenUsageByAgent.values.reduce(0) { $0 + $1.cost }
+    }
+
+    /// Aggregate tokens across all agents in this workspace.
+    var totalTokenCount: Int {
+        tokenUsageByAgent.values.reduce(0) { $0 + $1.totalTokens }
+    }
     var surfaceTTYNames: [UUID: String] = [:]
     private var restoredTerminalScrollbackByPanelId: [UUID: String] = [:]
 
@@ -3738,6 +3750,12 @@ extension Workspace: BonsplitDelegate {
 
         panels.removeValue(forKey: panelId)
         surfaceIdToPanelId.removeValue(forKey: tabId)
+        // Mark token usage as dead when a pane is closed
+        let surfaceKey = panelId.uuidString
+        if tokenUsageByAgent[surfaceKey] != nil {
+            tokenUsageByAgent[surfaceKey]?.isActive = false
+            NotificationCenter.default.post(name: .tokenUsageDidChange, object: nil)
+        }
         panelDirectories.removeValue(forKey: panelId)
         panelGitBranches.removeValue(forKey: panelId)
         panelPullRequests.removeValue(forKey: panelId)

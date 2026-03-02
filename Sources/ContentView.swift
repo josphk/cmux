@@ -5630,6 +5630,10 @@ struct VerticalTabsSidebar: View {
                 .background(Color.clear)
                 .modifier(ClearScrollBackground())
             }
+
+            TokenCostSidebarWidget()
+                .fixedSize(horizontal: false, vertical: true)
+
 #if DEBUG
             SidebarDevFooter(updateViewModel: updateViewModel)
                 .frame(maxWidth: .infinity, alignment: .leading)

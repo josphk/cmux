@@ -564,6 +564,8 @@ class TabManager: ObservableObject {
 
     @Published var tabs: [Workspace] = []
     @Published private(set) var isWorkspaceCycleHot: Bool = false
+    /// Bumped when any workspace's token usage changes. Observed by TokenCostSidebarWidget.
+    @Published var tokenUsageGeneration: UInt64 = 0
 
     /// Global monotonically increasing counter for CMUX_PORT ordinal assignment.
     /// Static so port ranges don't overlap across multiple windows (each window has its own TabManager).
@@ -672,6 +674,16 @@ class TabManager: ObservableObject {
                 guard let tabId = notification.userInfo?[GhosttyNotificationKey.tabId] as? UUID else { return }
                 guard let surfaceId = notification.userInfo?[GhosttyNotificationKey.surfaceId] as? UUID else { return }
                 markPanelReadOnFocusIfActive(tabId: tabId, panelId: surfaceId)
+            }
+        })
+
+        observers.append(NotificationCenter.default.addObserver(
+            forName: .tokenUsageDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { [weak self] in
+                self?.tokenUsageGeneration &+= 1
             }
         })
 
