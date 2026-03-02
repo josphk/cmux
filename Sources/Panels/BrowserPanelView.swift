@@ -350,7 +350,6 @@ struct BrowserPanelView: View {
             onRequestPanelFocus()
         }
         .onAppear {
-            hasConnectedAgent = panel.resolveTargetTerminal() != nil
             UserDefaults.standard.register(defaults: [
                 BrowserSearchSettings.searchEngineKey: BrowserSearchSettings.defaultSearchEngine.rawValue,
                 BrowserSearchSettings.searchSuggestionsEnabledKey: BrowserSearchSettings.defaultSearchSuggestionsEnabled,
@@ -400,7 +399,6 @@ struct BrowserPanelView: View {
         .onChange(of: isFocused) { focused in
             // Ensure this view doesn't retain focus while hidden (bonsplit keepAllAlive).
             if focused {
-                hasConnectedAgent = panel.resolveTargetTerminal() != nil
                 applyPendingAddressBarFocusRequestIfNeeded()
                 autoFocusOmnibarIfBlank()
             } else {
@@ -581,9 +579,15 @@ struct BrowserPanelView: View {
         }
     }
 
-    @State private var hasConnectedAgent: Bool = false
+    @ObservedObject private var bridgeWatcher = BrowserBridgeWatcher.shared
+
+    private var hasConnectedAgent: Bool {
+        panel.resolveTargetTerminal() != nil
+    }
 
     private var inspectionPickerButton: some View {
+        // Access bridgeWatcher.connectedSurfaceIds to trigger re-render on changes.
+        let _ = bridgeWatcher.connectedSurfaceIds
         let connected = panel.isInspectionModeActive || hasConnectedAgent
         return Button(action: {
             toggleInspectionMode()
