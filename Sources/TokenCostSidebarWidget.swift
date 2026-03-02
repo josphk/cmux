@@ -104,7 +104,7 @@ struct TokenCostSidebarWidget: View {
                             focusAgent(workspace: entry.workspace, surfaceId: entry.surfaceId)
                         }
                     )
-                    .transition(.opacity)
+                    .transition(.identity)
                 }
             }
             .padding(.bottom, isExpanded ? 6 : 0)
