@@ -548,6 +548,30 @@ struct BrowserPanelView: View {
         }
     }
 
+    /// Toggle inspection mode, resolving the target terminal surface to deliver picks to.
+    private func toggleInspectionMode() {
+        if panel.isInspectionModeActive {
+            panel.disableInspectionMode()
+            return
+        }
+
+        // Find a terminal panel in this workspace to deliver picks to.
+        guard let app = AppDelegate.shared,
+              let manager = app.tabManagerFor(tabId: panel.workspaceId),
+              let workspace = manager.tabs.first(where: { $0.id == panel.workspaceId }) else {
+            return
+        }
+
+        // Find the first terminal panel in the workspace.
+        let terminalPanelId = workspace.panels.first(where: { $1.panelType == .terminal })?.key
+        guard let terminalPanelId else {
+            // No terminal panel in this workspace — can't deliver picks anywhere.
+            return
+        }
+
+        panel.enableInspectionMode(targetSurfaceId: terminalPanelId.uuidString)
+    }
+
     @ViewBuilder
     private var inspectionBanner: some View {
         if panel.isInspectionModeActive {
@@ -576,7 +600,7 @@ struct BrowserPanelView: View {
 
     private var inspectionPickerButton: some View {
         Button(action: {
-            panel.toggleInspectionMode()
+            toggleInspectionMode()
         }) {
             Image(systemName: "scope")
                 .symbolRenderingMode(.monochrome)

@@ -69,24 +69,26 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	if (!isCmux) return;
 
 	// ── Watcher state ─────────────────────────────────────────────────────
-	/** Number of JSONL lines already processed per file path. */
-	const linesRead = new Map<string, number>();
+	const surfaceId = process.env.CMUX_SURFACE_ID!;
+	/** Path to this agent's bridge file (scoped by its own surface ID). */
+	const bridgeFile = path.join(BRIDGE_DIR, `${surfaceId}.jsonl`);
+	let linesRead = 0;
 	let dirWatcher: fs.FSWatcher | null = null;
 	let pollInterval: ReturnType<typeof setInterval> | null = null;
 
 	// ── Bridge file processing ────────────────────────────────────────────
 
-	/** Read new lines from a single .jsonl file and send them as user messages. */
-	function processFile(filePath: string): void {
+	/** Read new lines from this agent's bridge file and send them as user messages. */
+	function processBridgeFile(): void {
 		try {
-			const content = fs.readFileSync(filePath, "utf-8");
+			if (!fs.existsSync(bridgeFile)) return;
+			const content = fs.readFileSync(bridgeFile, "utf-8");
 			const lines = content.split("\n").filter((l) => l.trim());
-			const alreadyRead = linesRead.get(filePath) ?? 0;
 
-			if (lines.length <= alreadyRead) return;
+			if (lines.length <= linesRead) return;
 
-			const newLines = lines.slice(alreadyRead);
-			linesRead.set(filePath, lines.length);
+			const newLines = lines.slice(linesRead);
+			linesRead = lines.length;
 
 			for (const line of newLines) {
 				try {
@@ -94,24 +96,11 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 					const formatted = formatElement(el);
 					pi.sendUserMessage(`[browser pick] ${formatted}`, { deliverAs: "followUp" });
 				} catch {
-					pi.log(`[browser-bridge] malformed JSONL line in ${filePath}: ${line}`);
+					pi.log(`[browser-bridge] malformed JSONL line: ${line}`);
 				}
 			}
 		} catch {
 			// File may have been deleted or is temporarily inaccessible — skip silently.
-		}
-	}
-
-	/** Scan the bridge directory for all .jsonl files and process new lines. */
-	function scanBridgeDir(): void {
-		try {
-			if (!fs.existsSync(BRIDGE_DIR)) return;
-			const files = fs.readdirSync(BRIDGE_DIR).filter((f) => f.endsWith(".jsonl"));
-			for (const file of files) {
-				processFile(path.join(BRIDGE_DIR, file));
-			}
-		} catch {
-			// Directory may not exist yet — that's fine.
 		}
 	}
 
@@ -124,11 +113,11 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 			// Already exists or permissions issue — continue anyway.
 		}
 
-		// Primary: fs.watch on directory (fast but unreliable on macOS)
+		// Primary: fs.watch on directory, filter for our file
 		try {
 			dirWatcher = fs.watch(BRIDGE_DIR, (_eventType, filename) => {
-				if (filename && filename.endsWith(".jsonl")) {
-					processFile(path.join(BRIDGE_DIR, filename));
+				if (filename === `${surfaceId}.jsonl`) {
+					processBridgeFile();
 				}
 			});
 			dirWatcher.on("error", () => {
@@ -139,9 +128,9 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 		}
 
 		// Fallback: 2-second polling (catches anything fs.watch misses)
-		pollInterval = setInterval(scanBridgeDir, POLL_INTERVAL_MS);
+		pollInterval = setInterval(processBridgeFile, POLL_INTERVAL_MS);
 
-		pi.log("[browser-bridge] watcher started");
+		pi.log(`[browser-bridge] watching ${bridgeFile}`);
 	}
 
 	function stopWatching(): void {
@@ -153,7 +142,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 			clearInterval(pollInterval);
 			pollInterval = null;
 		}
-		linesRead.clear();
+		linesRead = 0;
 		pi.log("[browser-bridge] watcher stopped");
 	}
 

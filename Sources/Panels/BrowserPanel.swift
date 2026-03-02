@@ -1346,8 +1346,12 @@ final class BrowserPanel: Panel, ObservableObject {
     /// Count of elements picked in the current inspection session.
     @Published private(set) var inspectionPickCount: Int = 0
 
-    /// The surface ID for this browser panel (used for bridge file scoping).
+    /// The surface ID for this browser panel (set by socket command or defaulted to panel ID).
     var inspectionSurfaceId: String = ""
+
+    /// The target terminal surface ID that picks should be delivered to.
+    /// Set before enabling inspection mode. If empty, inspection won't enable.
+    var inspectionTargetSurfaceId: String = ""
 
     /// Sticky omnibar-focus intent. This survives view mount timing races and is
     /// cleared only after BrowserPanelView acknowledges handling it.
@@ -1578,31 +1582,58 @@ final class BrowserPanel: Panel, ObservableObject {
 
     // MARK: - Inspection mode (browser-bridge)
 
-    /// The JS injection script for inspection mode. Loaded once from the bundled file.
-    private static let inspectionModeScript: String = {
-        // Embedded from features/browser-bridge/inspection-mode.js
-        guard let url = Bundle.main.url(forResource: "inspection-mode", withExtension: "js"),
-              let script = try? String(contentsOf: url, encoding: .utf8) else {
-            // Fallback: load from the features directory during development
-            let devPath = "features/browser-bridge/inspection-mode.js"
-            if let script = try? String(contentsOfFile: devPath) {
+    /// The JS injection script for inspection mode. Loaded at init from the source tree.
+    /// Uses nonisolated(unsafe) since the file read happens once and the result is immutable.
+    nonisolated(unsafe) private static let inspectionModeScript: String = {
+        // Try loading from the source tree first (development), then bundle (release).
+        let candidates = [
+            // When launched from the repo root (reload.sh, Xcode)
+            URL(fileURLWithPath: "features/browser-bridge/inspection-mode.js"),
+            // Absolute fallback for the repo checkout
+            URL(fileURLWithPath: NSString("~/Code/cmux/features/browser-bridge/inspection-mode.js").expandingTildeInPath),
+        ]
+        for candidate in candidates {
+            if let script = try? String(contentsOf: candidate, encoding: .utf8), !script.isEmpty {
                 return script
             }
-            NSLog("BrowserPanel: inspection-mode.js not found in bundle or dev path")
-            return ""
         }
-        return script
+        // Bundle resource (for release builds where the file is copied into Resources)
+        if let url = Bundle.main.url(forResource: "inspection-mode", withExtension: "js"),
+           let script = try? String(contentsOf: url, encoding: .utf8) {
+            return script
+        }
+        NSLog("BrowserPanel: inspection-mode.js not found")
+        return ""
     }()
 
-    /// File URL for the JSONL bridge file (one per surface, scoped by surfaceId).
+    /// File URL for the JSONL bridge file, scoped by the target terminal surface ID.
+    /// Each pi extension instance watches only its own surface's file.
     var bridgeFileURL: URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("cmux-bridge")
-            .appendingPathComponent("\(inspectionSurfaceId).jsonl")
+            .appendingPathComponent("\(inspectionTargetSurfaceId).jsonl")
     }
 
-    func enableInspectionMode() {
-        guard !isInspectionModeActive, !isShowingNewTabPage else { return }
+    /// Enable inspection mode, delivering picks to `targetSurfaceId`.
+    /// If `targetSurfaceId` is nil, the previously set `inspectionTargetSurfaceId` is used.
+    /// Returns false if inspection could not be enabled (no target, new-tab page, etc.).
+    @discardableResult
+    func enableInspectionMode(targetSurfaceId: String? = nil) -> Bool {
+        guard !isInspectionModeActive, !isShowingNewTabPage else { return false }
+
+        if let target = targetSurfaceId {
+            inspectionTargetSurfaceId = target
+        }
+        guard !inspectionTargetSurfaceId.isEmpty else {
+            NSLog("BrowserPanel: cannot enable inspection — no target terminal surface")
+            return false
+        }
+
+        // Default browser surface ID to panel UUID if not set by socket command.
+        if inspectionSurfaceId.isEmpty {
+            inspectionSurfaceId = id.uuidString
+        }
+
         isInspectionModeActive = true
         inspectionPickCount = 0
 
@@ -1617,9 +1648,10 @@ final class BrowserPanel: Panel, ObservableObject {
                 return
             }
             #if DEBUG
-            dlog("browser.inspect.enabled surfaceId=\(self.inspectionSurfaceId)")
+            dlog("browser.inspect.enabled surfaceId=\(self.inspectionSurfaceId) target=\(self.inspectionTargetSurfaceId)")
             #endif
         }
+        return true
     }
 
     func disableInspectionMode() {
@@ -1633,7 +1665,11 @@ final class BrowserPanel: Panel, ObservableObject {
     }
 
     func toggleInspectionMode() {
-        isInspectionModeActive ? disableInspectionMode() : enableInspectionMode()
+        if isInspectionModeActive {
+            disableInspectionMode()
+        } else {
+            enableInspectionMode()
+        }
     }
 
     /// Handle an element pick from the JS injection (called by InspectionMessageHandler).
