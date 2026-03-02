@@ -44,12 +44,13 @@ export default function (pi: ExtensionAPI) {
     let totalInput = 0, totalOutput = 0, totalCacheRead = 0, totalCacheWrite = 0, totalCost = 0;
 
     for (const entry of branch) {
-      if (entry.role === "assistant" && entry.usage) {
-        totalInput += entry.usage.input ?? 0;
-        totalOutput += entry.usage.output ?? 0;
-        totalCacheRead += entry.usage.cacheRead ?? 0;
-        totalCacheWrite += entry.usage.cacheWrite ?? 0;
-        totalCost += entry.usage.cost?.total ?? 0;
+      const msg = entry.message;
+      if (msg?.role === "assistant" && msg.usage) {
+        totalInput += msg.usage.input ?? 0;
+        totalOutput += msg.usage.output ?? 0;
+        totalCacheRead += msg.usage.cacheRead ?? 0;
+        totalCacheWrite += msg.usage.cacheWrite ?? 0;
+        totalCost += msg.usage.cost?.total ?? 0;
       }
     }
 
