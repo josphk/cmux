@@ -5615,6 +5615,7 @@ struct VerticalTabsSidebar: View {
             }
 
             TokenCostSidebarWidget()
+                .fixedSize(horizontal: false, vertical: true)
 
 #if DEBUG
             SidebarDevFooter(updateViewModel: updateViewModel)
