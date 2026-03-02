@@ -582,11 +582,6 @@ struct BrowserPanelView: View {
                 Text("Click elements to reference in chat")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
-                if panel.inspectionPickCount > 0 {
-                    Text("(\(panel.inspectionPickCount) picked)")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.accentColor)
-                }
                 Spacer()
                 Text("⌘⇧I to finish")
                     .font(.system(size: 10))
