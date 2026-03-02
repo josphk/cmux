@@ -562,14 +562,19 @@ struct BrowserPanelView: View {
             return
         }
 
-        // Find the first terminal panel in the workspace.
-        let terminalPanelId = workspace.panels.first(where: { $1.panelType == .terminal })?.key
-        guard let terminalPanelId else {
-            // No terminal panel in this workspace — can't deliver picks anywhere.
-            return
-        }
+        // Find the terminal panel that has an active agent (.listening file).
+        let terminalIds = workspace.panels
+            .filter { $1.panelType == .terminal }
+            .map { $0.key }
+        guard !terminalIds.isEmpty else { return }
 
-        panel.enableInspectionMode(targetSurfaceId: terminalPanelId.uuidString)
+        let bridgeDir = URL(fileURLWithPath: "/tmp/cmux-browser-bridge", isDirectory: true)
+        let targetId = terminalIds.first(where: { id in
+            FileManager.default.fileExists(atPath: bridgeDir.appendingPathComponent("\(id.uuidString).listening").path)
+        })
+        guard let targetId else { return }
+
+        panel.enableInspectionMode(targetSurfaceId: targetId.uuidString)
     }
 
     @ViewBuilder

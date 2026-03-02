@@ -5558,9 +5558,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 if focusedPanel.isInspectionModeActive {
                     focusedPanel.disableInspectionMode()
                 } else if let workspace = tabManager?.selectedTab {
-                    let terminalPanelId = workspace.panels.first(where: { $0.value.panelType == .terminal })?.key
-                    if let terminalPanelId {
-                        focusedPanel.enableInspectionMode(targetSurfaceId: terminalPanelId.uuidString)
+                    let bridgeDir = URL(fileURLWithPath: "/tmp/cmux-browser-bridge", isDirectory: true)
+                    let targetId = workspace.panels
+                        .filter { $1.panelType == .terminal }
+                        .map { $0.key }
+                        .first(where: { id in
+                            FileManager.default.fileExists(atPath: bridgeDir.appendingPathComponent("\(id.uuidString).listening").path)
+                        })
+                    if let targetId {
+                        focusedPanel.enableInspectionMode(targetSurfaceId: targetId.uuidString)
                     }
                 }
                 #if DEBUG
