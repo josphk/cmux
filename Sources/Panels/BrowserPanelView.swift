@@ -299,6 +299,7 @@ struct BrowserPanelView: View {
     var body: some View {
         VStack(spacing: 0) {
             addressBar
+            inspectionBanner
             webView
         }
         .overlay {
@@ -465,6 +466,7 @@ struct BrowserPanelView: View {
                 .accessibilityLabel("Browser omnibar")
 
             if !panel.isShowingNewTabPage {
+                inspectionPickerButton
                 browserThemeModeButton
                 developerToolsButton
             }
@@ -544,6 +546,49 @@ struct BrowserPanelView: View {
                 .help("Download in progress")
             }
         }
+    }
+
+    @ViewBuilder
+    private var inspectionBanner: some View {
+        if panel.isInspectionModeActive {
+            HStack(spacing: 6) {
+                Image(systemName: "scope")
+                    .font(.system(size: 11))
+                    .foregroundColor(.accentColor)
+                Text("Click elements to reference in chat")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                if panel.inspectionPickCount > 0 {
+                    Text("(\(panel.inspectionPickCount) picked)")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.accentColor)
+                }
+                Spacer()
+                Text("⌘⇧I to finish")
+                    .font(.system(size: 10))
+                    .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Color.accentColor.opacity(0.08))
+        }
+    }
+
+    private var inspectionPickerButton: some View {
+        Button(action: {
+            panel.toggleInspectionMode()
+        }) {
+            Image(systemName: "scope")
+                .symbolRenderingMode(.monochrome)
+                .cmuxFlatSymbolColorRendering()
+                .font(.system(size: devToolsButtonIconSize, weight: panel.isInspectionModeActive ? .bold : .medium))
+                .foregroundStyle(panel.isInspectionModeActive ? Color.accentColor : devToolsColorOption.color)
+                .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
+        }
+        .buttonStyle(OmnibarAddressButtonStyle())
+        .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
+        .help("Pick element for agent chat (⌘⇧I)")
+        .accessibilityIdentifier("BrowserInspectionPickerButton")
     }
 
     private var developerToolsButton: some View {
