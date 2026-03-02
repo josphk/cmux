@@ -949,6 +949,12 @@ class TerminalController {
         case "clear_ports":
             return clearPorts(args)
 
+        case "report_tokens":
+            return handleReportTokens(args)
+
+        case "clear_tokens":
+            return handleClearTokens(args)
+
         case "report_tty":
             return reportTTY(args)
 
@@ -8768,6 +8774,8 @@ class TerminalController {
           list_log [--limit=N] [--tab=X] - List log entries
           set_progress <0.0-1.0> [--label=X] [--tab=X] - Set progress bar
           clear_progress [--tab=X] - Clear progress bar
+          report_tokens --cost=<usd> [--input=N] [--output=N] [--cache-read=N] [--cache-write=N] [--model=<name>] [--tab=X] - Report token usage/cost
+          clear_tokens [--tab=X] - Clear token usage data
           report_git_branch <branch> [--status=dirty] [--tab=X] [--panel=Y] - Report git branch
           clear_git_branch [--tab=X] [--panel=Y] - Clear git branch
           report_pr <number> <url> [--label=PR] [--state=open|merged|closed] [--tab=X] [--panel=Y] - Report pull request / review item
@@ -12170,6 +12178,41 @@ class TerminalController {
             }
         }
         return result
+    }
+
+    // MARK: - Token Usage
+
+    private func handleReportTokens(_ args: String) -> String {
+        let parsed = parseOptions(args)
+        guard let costStr = parsed.options["cost"], let cost = Double(costStr) else {
+            return "ERROR: --cost required"
+        }
+        var state = TokenUsageState()
+        state.cost = cost
+        if let v = parsed.options["input"], let n = Int(v) { state.input = n }
+        if let v = parsed.options["output"], let n = Int(v) { state.output = n }
+        if let v = parsed.options["cache-read"], let n = Int(v) { state.cacheRead = n }
+        if let v = parsed.options["cache-write"], let n = Int(v) { state.cacheWrite = n }
+        if let m = parsed.options["model"], !m.isEmpty { state.model = m }
+        state.totalTokens = state.input + state.output + state.cacheRead + state.cacheWrite
+
+        // Parse off-main, async-mutate on main (threading policy for telemetry).
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard let tab = self.resolveTabForReport(args) else { return }
+            tab.tokenUsage = state
+        }
+        return "OK"
+    }
+
+    private func handleClearTokens(_ args: String) -> String {
+        // Parse off-main, async-mutate on main (threading policy for telemetry).
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard let tab = self.resolveTabForReport(args) else { return }
+            tab.tokenUsage = nil
+        }
+        return "OK"
     }
 
     private func reportGitBranch(_ args: String) -> String {

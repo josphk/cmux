@@ -970,6 +970,7 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var panelPullRequests: [UUID: SidebarPullRequestState] = [:]
     @Published var surfaceListeningPorts: [UUID: [Int]] = [:]
     @Published var listeningPorts: [Int] = []
+    @Published var tokenUsage: TokenUsageState?
     var surfaceTTYNames: [UUID: String] = [:]
     private var restoredTerminalScrollbackByPanelId: [UUID: String] = [:]
 
