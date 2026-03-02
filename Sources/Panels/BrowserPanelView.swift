@@ -598,8 +598,14 @@ struct BrowserPanelView: View {
         .buttonStyle(OmnibarAddressButtonStyle())
         .disabled(!connected)
         .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
-        .help(connected ? "Pick element for agent chat (⌘⇧I)" : "No connected agents")
         .accessibilityIdentifier("BrowserInspectionPickerButton")
+        .overlay {
+            // Invisible overlay to show tooltip even when button is disabled.
+            Color.clear
+                .contentShape(Rectangle())
+                .help(connected ? "Pick element for agent chat (⌘⇧I)" : "No connected agents")
+                .allowsHitTesting(false)
+        }
     }
 
     private var developerToolsButton: some View {
