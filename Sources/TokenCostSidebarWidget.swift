@@ -47,9 +47,9 @@ struct TokenCostSidebarWidget: View {
                 .frame(height: 1)
 
             // Header: always visible, shows aggregate
-            HStack(spacing: 4) {
+            HStack(alignment: .center, spacing: 4) {
                 Image(systemName: "dollarsign.circle")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                 Text(formattedTotalCost)
                     .font(.system(size: 11, weight: .semibold))
