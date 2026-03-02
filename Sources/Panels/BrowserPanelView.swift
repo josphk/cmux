@@ -602,6 +602,7 @@ struct BrowserPanelView: View {
         .buttonStyle(OmnibarAddressButtonStyle())
         .disabled(!connected)
         .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
+        .help("Toggle Pick Mode (⌘⇧I)")
         .accessibilityIdentifier("BrowserInspectionPickerButton")
     }
 
