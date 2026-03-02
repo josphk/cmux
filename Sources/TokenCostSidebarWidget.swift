@@ -214,7 +214,7 @@ private struct TokenCostAgentRow: View {
         .padding(.vertical, 3)
         .background(
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color(nsColor: .white).opacity(showHover || showRemoveHover ? 0.06 : 0))
+                .fill(Color(nsColor: .white).opacity(showHover ? 0.06 : 0))
         )
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
