@@ -106,11 +106,21 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 
 	// ── Watcher lifecycle ─────────────────────────────────────────────────
 
+	/** Presence marker so the Swift side knows an agent is listening for this surface. */
+	const presenceFile = path.join(BRIDGE_DIR, `${surfaceId}.listening`);
+
 	function startWatching(): void {
 		try {
 			fs.mkdirSync(BRIDGE_DIR, { recursive: true });
 		} catch {
 			// Already exists or permissions issue — continue anyway.
+		}
+
+		// Write presence marker so cmux knows we're listening.
+		try {
+			fs.writeFileSync(presenceFile, `${process.pid}\n`, "utf-8");
+		} catch {
+			pi.log("[browser-bridge] failed to write presence marker");
 		}
 
 		// Primary: fs.watch on directory, filter for our file
@@ -143,6 +153,10 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 			pollInterval = null;
 		}
 		linesRead = 0;
+
+		// Remove presence marker.
+		try { fs.unlinkSync(presenceFile); } catch {}
+
 		pi.log("[browser-bridge] watcher stopped");
 	}
 

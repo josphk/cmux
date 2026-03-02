@@ -1629,6 +1629,17 @@ final class BrowserPanel: Panel, ObservableObject {
             return false
         }
 
+        // Check if an agent is actually listening on the target surface.
+        let presenceFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-bridge")
+            .appendingPathComponent("\(inspectionTargetSurfaceId).listening")
+        guard FileManager.default.fileExists(atPath: presenceFile.path) else {
+            #if DEBUG
+            dlog("browser.inspect.noAgent target=\(inspectionTargetSurfaceId)")
+            #endif
+            return false
+        }
+
         // Default browser surface ID to panel UUID if not set by socket command.
         if inspectionSurfaceId.isEmpty {
             inspectionSurfaceId = id.uuidString
