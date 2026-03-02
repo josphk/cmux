@@ -158,6 +158,7 @@ private struct TokenCostAgentRow: View {
                         .strokeBorder(usage.isActive ? Color.clear : Color.gray.opacity(0.5), lineWidth: 1)
                 )
                 .frame(width: 6, height: 6)
+                .padding(.trailing, 2)
 
             Text(workspaceTitle)
                 .font(.system(size: 9))
