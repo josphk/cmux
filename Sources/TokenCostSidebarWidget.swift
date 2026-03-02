@@ -47,54 +47,52 @@ struct TokenCostSidebarWidget: View {
                 .frame(height: 1)
 
             // Header: always visible, shows aggregate
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "dollarsign.circle")
-                        .font(.system(size: 10, weight: .medium))
+            HStack(spacing: 4) {
+                Image(systemName: "dollarsign.circle")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text(formattedTotalCost)
+                    .font(.system(size: 11, weight: .semibold))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(.default, value: totalCost)
+                if totalTokens > 0 {
+                    Text("·")
                         .foregroundStyle(.secondary)
-                    Text(formattedTotalCost)
-                        .font(.system(size: 11, weight: .semibold))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                        .animation(.default, value: totalCost)
-                    if totalTokens > 0 {
-                        Text("·")
-                            .foregroundStyle(.secondary)
-                        Text(formattedTotalTokens)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if agentCount > 0 {
-                        Text("\(agentCount)")
-                            .font(.system(size: 9, weight: .medium))
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(
-                                Capsule()
-                                    .fill(Color(nsColor: .separatorColor).opacity(0.6))
-                            )
-                            .contentTransition(.numericText())
-                            .animation(.default, value: agentCount)
-                    }
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .animation(.easeInOut(duration: 0.2), value: isExpanded)
+                    Text(formattedTotalTokens)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
                 }
+                Spacer()
+                if agentCount > 0 {
+                    Text("\(agentCount)")
+                        .font(.system(size: 9, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(
+                            Capsule()
+                                .fill(Color(nsColor: .separatorColor).opacity(0.6))
+                        )
+                        .contentTransition(.numericText())
+                        .animation(.default, value: agentCount)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .animation(.easeInOut(duration: 0.2), value: isExpanded)
             }
-            .buttonStyle(.plain)
             .foregroundStyle(totalCost > 0 ? .primary : .secondary)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded.toggle()
+                }
+            }
 
             // Per-agent breakdown
             if isExpanded {
