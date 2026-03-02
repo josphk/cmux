@@ -164,13 +164,13 @@ private struct TokenCostAgentRow: View {
         .background(
             RoundedRectangle(cornerRadius: 4)
                 .fill(Color(nsColor: .white).opacity(isHovered ? 0.06 : 0))
+                .animation(.easeInOut(duration: 0.15), value: isHovered)
         )
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
+        .animation(.easeInOut(duration: 0.15), value: isHovered)
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isHovered = hovering
-            }
+            isHovered = hovering
         }
         .onTapGesture {
             onTap()
