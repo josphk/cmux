@@ -176,7 +176,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	const activeTargetFile = path.join(BRIDGE_DIR, "active-target");
 	let targetWatcher: fs.FSWatcher | null = null;
 	let uiRef: {
-		setWidget: (key: string, content: string[] | undefined, options?: { placement?: string }) => void;
+		setStatus: (key: string, text: string | undefined) => void;
 	} | null = null;
 
 	function checkActiveTarget(): void {
@@ -184,13 +184,13 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 		try {
 			const target = fs.readFileSync(activeTargetFile, "utf-8").trim();
 			if (target === surfaceId) {
-				uiRef.setWidget("browser-bridge", ["● Ready for browser picks"], { placement: "aboveEditor" });
+				uiRef.setStatus("browser-bridge", "● Ready for browser picks");
 			} else {
-				uiRef.setWidget("browser-bridge", undefined);
+				uiRef.setStatus("browser-bridge", undefined);
 			}
 		} catch {
-			// File doesn't exist yet — clear widget.
-			uiRef.setWidget("browser-bridge", undefined);
+			// File doesn't exist yet — clear status.
+			uiRef.setStatus("browser-bridge", undefined);
 		}
 	}
 
