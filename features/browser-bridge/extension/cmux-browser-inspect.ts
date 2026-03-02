@@ -3,7 +3,7 @@
  *
  * Bridges browser element picks from cmux inspection mode into the pi agent conversation.
  *
- * Flow A (user-initiated): Watches /tmp/cmux-bridge/*.jsonl for new picks and injects them
+ * Flow A (user-initiated): Watches /tmp/cmux-browser-bridge/*.jsonl for new picks and injects them
  *         as user messages.
  * Flow B (agent-initiated): Provides a `browser_inspect` tool the LLM can call to request
  *         the user pick elements.
@@ -15,7 +15,7 @@ import { Type } from "@sinclair/typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const BRIDGE_DIR = "/tmp/cmux-bridge";
+const BRIDGE_DIR = "/tmp/cmux-browser-bridge";
 const POLL_INTERVAL_MS = 2000;
 const DEFAULT_TIMEOUT_MS = 60000;
 

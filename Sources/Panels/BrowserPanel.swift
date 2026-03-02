@@ -1610,7 +1610,7 @@ final class BrowserPanel: Panel, ObservableObject {
     /// Each pi extension instance watches only its own surface's file.
     var bridgeFileURL: URL {
         FileManager.default.temporaryDirectory
-            .appendingPathComponent("cmux-bridge")
+            .appendingPathComponent("cmux-browser-bridge")
             .appendingPathComponent("\(inspectionTargetSurfaceId).jsonl")
     }
 
@@ -1631,7 +1631,7 @@ final class BrowserPanel: Panel, ObservableObject {
 
         // Check if an agent is actually listening on the target surface.
         let presenceFile = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cmux-bridge")
+            .appendingPathComponent("cmux-browser-bridge")
             .appendingPathComponent("\(inspectionTargetSurfaceId).listening")
         guard FileManager.default.fileExists(atPath: presenceFile.path) else {
             #if DEBUG
