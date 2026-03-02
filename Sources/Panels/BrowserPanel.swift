@@ -1351,7 +1351,7 @@ final class BrowserPanel: Panel, ObservableObject {
 
     /// The target terminal surface ID that picks should be delivered to.
     /// Set before enabling inspection mode. If empty, inspection won't enable.
-    var inspectionTargetSurfaceId: String = ""
+
 
     /// Sticky omnibar-focus intent. This survives view mount timing races and is
     /// cleared only after BrowserPanelView acknowledges handling it.
@@ -1610,33 +1610,38 @@ final class BrowserPanel: Panel, ObservableObject {
     /// the pi extension which also writes to /tmp/cmux-browser-bridge/.
     private static let bridgeBaseDir = URL(fileURLWithPath: "/tmp/cmux-browser-bridge", isDirectory: true)
 
-    /// File URL for the JSONL bridge file, scoped by the target terminal surface ID.
-    /// Each pi extension instance watches only its own surface's file.
-    var bridgeFileURL: URL {
-        Self.bridgeBaseDir.appendingPathComponent("\(inspectionTargetSurfaceId).jsonl")
+    /// Resolve the current target terminal — the last focused terminal with an active agent.
+    /// Returns nil if no terminal has an agent listening.
+    func resolveTargetTerminal() -> UUID? {
+        guard let app = AppDelegate.shared,
+              let manager = app.tabManagerFor(tabId: workspaceId),
+              let workspace = manager.tabs.first(where: { $0.id == workspaceId }) else {
+            return nil
+        }
+        func hasAgent(_ id: UUID) -> Bool {
+            FileManager.default.fileExists(atPath: Self.bridgeBaseDir.appendingPathComponent("\(id.uuidString).listening").path)
+        }
+        if let last = workspace.lastFocusedTerminalPanelId, hasAgent(last) {
+            return last
+        }
+        return workspace.panels.filter { $1.panelType == .terminal }.first(where: { hasAgent($0.key) })?.key
     }
 
-    /// Enable inspection mode, delivering picks to `targetSurfaceId`.
-    /// If `targetSurfaceId` is nil, the previously set `inspectionTargetSurfaceId` is used.
-    /// Returns false if inspection could not be enabled (no target, new-tab page, etc.).
+    /// File URL for the JSONL bridge file, scoped by a target terminal surface ID.
+    func bridgeFileURL(for targetId: UUID) -> URL {
+        Self.bridgeBaseDir.appendingPathComponent("\(targetId.uuidString).jsonl")
+    }
+
+    /// Enable inspection mode. Requires at least one terminal with an active agent.
+    /// Returns false if inspection could not be enabled.
     @discardableResult
-    func enableInspectionMode(targetSurfaceId: String? = nil) -> Bool {
+    func enableInspectionMode() -> Bool {
         guard !isInspectionModeActive, !isShowingNewTabPage else { return false }
 
-        if let target = targetSurfaceId {
-            inspectionTargetSurfaceId = target
-        }
-        guard !inspectionTargetSurfaceId.isEmpty else {
-            NSLog("BrowserPanel: cannot enable inspection — no target terminal surface")
-            return false
-        }
-
-        // Check if an agent is actually listening on the target surface.
-        let presenceFile = Self.bridgeBaseDir
-            .appendingPathComponent("\(inspectionTargetSurfaceId).listening")
-        guard FileManager.default.fileExists(atPath: presenceFile.path) else {
+        // Verify at least one agent is listening.
+        guard resolveTargetTerminal() != nil else {
             #if DEBUG
-            dlog("browser.inspect.noAgent target=\(inspectionTargetSurfaceId)")
+            dlog("browser.inspect.noAgent")
             #endif
             return false
         }
@@ -1649,9 +1654,6 @@ final class BrowserPanel: Panel, ObservableObject {
         isInspectionModeActive = true
         inspectionPickCount = 0
 
-        // Clear any stale bridge file from previous session.
-        clearBridgeFile()
-
         webView.evaluateJavaScript(Self.inspectionModeScript) { [weak self] _, error in
             guard let self else { return }
             if let error {
@@ -1660,7 +1662,7 @@ final class BrowserPanel: Panel, ObservableObject {
                 return
             }
             #if DEBUG
-            dlog("browser.inspect.enabled surfaceId=\(self.inspectionSurfaceId) target=\(self.inspectionTargetSurfaceId)")
+            dlog("browser.inspect.enabled surfaceId=\(self.inspectionSurfaceId)")
             #endif
         }
         return true
@@ -1671,8 +1673,8 @@ final class BrowserPanel: Panel, ObservableObject {
         isInspectionModeActive = false
         webView.evaluateJavaScript("window.__cmuxInspectCleanup && window.__cmuxInspectCleanup()") { _, _ in }
 
-        // Clean up the bridge file — picks are ephemeral, no persistence needed.
-        try? FileManager.default.removeItem(at: bridgeFileURL)
+        // No bridge file cleanup needed — files are ephemeral per-pick and
+        // each agent's extension manages its own read offset.
 
         #if DEBUG
         dlog("browser.inspect.disabled picked=\(inspectionPickCount)")
@@ -1689,10 +1691,17 @@ final class BrowserPanel: Panel, ObservableObject {
 
     /// Handle an element pick from the JS injection (called by InspectionMessageHandler).
     func handleInspectedElement(_ data: [String: Any]) {
+        // Resolve target dynamically — picks always go to the last focused terminal with an agent.
+        guard let targetId = resolveTargetTerminal() else {
+            #if DEBUG
+            dlog("browser.inspect.pick.dropped — no agent listening")
+            #endif
+            return
+        }
+
         inspectionPickCount += 1
 
-        let bridgeDir = bridgeFileURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: bridgeDir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: Self.bridgeBaseDir, withIntermediateDirectories: true)
 
         var payload = data
         payload["timestamp"] = ISO8601DateFormatter().string(from: Date())
@@ -1700,27 +1709,23 @@ final class BrowserPanel: Panel, ObservableObject {
         payload["pick_index"] = inspectionPickCount
         payload["event_id"] = UUID().uuidString
 
+        let fileURL = bridgeFileURL(for: targetId)
         if let jsonData = try? JSONSerialization.data(withJSONObject: payload),
            var line = String(data: jsonData, encoding: .utf8) {
             line += "\n"
 
-            if let handle = try? FileHandle(forWritingTo: bridgeFileURL) {
+            if let handle = try? FileHandle(forWritingTo: fileURL) {
                 handle.seekToEndOfFile()
                 handle.write(line.data(using: .utf8)!)
                 handle.closeFile()
             } else {
-                // First pick — create the file.
-                try? line.write(to: bridgeFileURL, atomically: true, encoding: .utf8)
+                try? line.write(to: fileURL, atomically: true, encoding: .utf8)
             }
         }
 
         #if DEBUG
-        dlog("browser.inspect.pick #\(inspectionPickCount) selector=\(data["selector"] ?? "") role=\(data["role"] ?? "")")
+        dlog("browser.inspect.pick #\(inspectionPickCount) selector=\(data["selector"] ?? "") target=\(targetId.uuidString.prefix(5))")
         #endif
-    }
-
-    private func clearBridgeFile() {
-        try? FileManager.default.removeItem(at: bridgeFileURL)
     }
 
     func sessionNavigationHistorySnapshot() -> (

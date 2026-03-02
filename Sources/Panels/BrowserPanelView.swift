@@ -555,31 +555,7 @@ struct BrowserPanelView: View {
             return
         }
 
-        // Find a terminal panel in this workspace to deliver picks to.
-        guard let app = AppDelegate.shared,
-              let manager = app.tabManagerFor(tabId: panel.workspaceId),
-              let workspace = manager.tabs.first(where: { $0.id == panel.workspaceId }) else {
-            return
-        }
-
-        // Prefer the last focused terminal if it has an active agent.
-        let bridgeDir = URL(fileURLWithPath: "/tmp/cmux-browser-bridge", isDirectory: true)
-        func hasAgent(_ id: UUID) -> Bool {
-            FileManager.default.fileExists(atPath: bridgeDir.appendingPathComponent("\(id.uuidString).listening").path)
-        }
-
-        let targetId: UUID?
-        if let last = workspace.lastFocusedTerminalPanelId, hasAgent(last) {
-            targetId = last
-        } else {
-            // Fall back to any terminal with an active agent.
-            targetId = workspace.panels
-                .filter { $1.panelType == .terminal }
-                .first(where: { hasAgent($0.key) })?.key
-        }
-        guard let targetId else { return }
-
-        panel.enableInspectionMode(targetSurfaceId: targetId.uuidString)
+        panel.enableInspectionMode()
     }
 
     @ViewBuilder

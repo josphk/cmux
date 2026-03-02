@@ -7884,51 +7884,15 @@ class TerminalController {
             return .err(code: "internal_error", message: "Failed to resolve browser panel", data: nil)
         }
 
-        // Resolve target terminal surface: explicit param, or caller's surface, or first terminal in workspace.
-        var targetSurfaceId: String?
-        v2MainSync {
-            if let explicit = v2String(params, "target_surface_id") {
-                targetSurfaceId = explicit
-            } else if let callerSurfaceId = v2UUID(params, "caller_surface_id") {
-                // CLI sends caller's CMUX_SURFACE_ID — use it if it's a terminal
-                if ws.terminalPanel(for: callerSurfaceId) != nil {
-                    targetSurfaceId = callerSurfaceId.uuidString
-                }
-            }
-            // Fallback: first terminal panel in workspace
-            if targetSurfaceId == nil {
-                targetSurfaceId = ws.panels.first(where: { $0.value.panelType == .terminal })?.key.uuidString
-            }
-        }
-
-        guard let targetSurfaceId else {
-            return .err(code: "not_found", message: "No terminal surface in workspace to deliver picks to", data: nil)
-        }
-
-        // Build the bridge file path scoped to the TARGET terminal surface.
-        let bridgeDir = URL(fileURLWithPath: "/tmp/cmux-browser-bridge", isDirectory: true)
-        let bridgeFile = bridgeDir.appendingPathComponent("\(targetSurfaceId).jsonl")
-
-        // Ensure the bridge directory exists.
-        try? FileManager.default.createDirectory(
-            at: bridgeFile.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-
-        // Clear any stale bridge data from a previous session.
-        try? FileManager.default.removeItem(at: bridgeFile)
-
         if !wait {
             // Non-wait mode: enable inspection and return immediately.
             DispatchQueue.main.async {
                 browserPanel.inspectionSurfaceId = surfaceId.uuidString
-                browserPanel.enableInspectionMode(targetSurfaceId: targetSurfaceId)
+                browserPanel.enableInspectionMode()
             }
             return .ok([
                 "status": "enabled",
                 "surface_id": surfaceId.uuidString,
-                "target_surface_id": targetSurfaceId,
-                "bridge_file": bridgeFile.path
             ])
         }
 
@@ -7937,8 +7901,13 @@ class TerminalController {
         //           We only dispatch to main for the initial enable and final disable.
         DispatchQueue.main.async {
             browserPanel.inspectionSurfaceId = surfaceId.uuidString
-            browserPanel.enableInspectionMode(targetSurfaceId: targetSurfaceId)
+            browserPanel.enableInspectionMode()
         }
+
+        // Build bridge file path for the caller's surface to read picks.
+        let bridgeDir = URL(fileURLWithPath: "/tmp/cmux-browser-bridge", isDirectory: true)
+        let callerSurface = v2UUID(params, "caller_surface_id") ?? surfaceId
+        let bridgeFile = bridgeDir.appendingPathComponent("\(callerSurface.uuidString).jsonl")
 
         let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
         let pollInterval: TimeInterval = 0.2

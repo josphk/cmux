@@ -5557,22 +5557,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             if let focusedPanel = tabManager?.focusedBrowserPanel {
                 if focusedPanel.isInspectionModeActive {
                     focusedPanel.disableInspectionMode()
-                } else if let workspace = tabManager?.selectedTab {
-                    let bridgeDir = URL(fileURLWithPath: "/tmp/cmux-browser-bridge", isDirectory: true)
-                    func hasAgent(_ id: UUID) -> Bool {
-                        FileManager.default.fileExists(atPath: bridgeDir.appendingPathComponent("\(id.uuidString).listening").path)
-                    }
-                    let targetId: UUID?
-                    if let last = workspace.lastFocusedTerminalPanelId, hasAgent(last) {
-                        targetId = last
-                    } else {
-                        targetId = workspace.panels
-                            .filter { $1.panelType == .terminal }
-                            .first(where: { hasAgent($0.key) })?.key
-                    }
-                    if let targetId {
-                        focusedPanel.enableInspectionMode(targetSurfaceId: targetId.uuidString)
-                    }
+                } else {
+                    focusedPanel.enableInspectionMode()
                 }
                 #if DEBUG
                 dlog("shortcut.action name=toggleBrowserInspection panel=\(focusedPanel.id.uuidString.prefix(5)) active=\(focusedPanel.isInspectionModeActive)")
