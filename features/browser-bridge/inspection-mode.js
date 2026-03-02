@@ -292,14 +292,21 @@
     }, 200);
   }
 
+  // --- Hide overlay when mouse leaves the page ---
+  function onMouseLeave() {
+    overlay.style.display = 'none';
+  }
+
   // --- Register listeners ---
   document.addEventListener('mousemove', onMouseMove, true);
   document.addEventListener('click', onClickCapture, true);
+  document.documentElement.addEventListener('mouseleave', onMouseLeave, false);
 
   // --- Cleanup function ---
   window.__cmuxInspectCleanup = function() {
     document.removeEventListener('mousemove', onMouseMove, true);
     document.removeEventListener('click', onClickCapture, true);
+    document.documentElement.removeEventListener('mouseleave', onMouseLeave, false);
 
     // Remove all injected DOM elements
     var injected = document.querySelectorAll('[' + ATTR + ']');
