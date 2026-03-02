@@ -1,8 +1,43 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { execFile } from "child_process";
+import { createConnection } from "net";
 
 export default function (pi: ExtensionAPI) {
   let lastReportedCost = -1;
+
+  function buildCommand(totalCost: number, totalInput: number, totalOutput: number,
+    totalCacheRead: number, totalCacheWrite: number, modelId: string) {
+    return {
+      socketCmd: `report_tokens --cost=${totalCost.toFixed(4)}`
+        + ` --input=${totalInput} --output=${totalOutput}`
+        + ` --cache-read=${totalCacheRead} --cache-write=${totalCacheWrite}`
+        + ` --model=${modelId}`,
+      cliArgs: [
+        "report-tokens",
+        "--cost", totalCost.toFixed(4),
+        "--input", String(totalInput),
+        "--output", String(totalOutput),
+        "--cache-read", String(totalCacheRead),
+        "--cache-write", String(totalCacheWrite),
+        "--model", modelId,
+      ],
+    };
+  }
+
+  function sendViaSocket(cmd: string) {
+    const socketPath = process.env.CMUX_SOCKET_PATH
+      ?? process.env.CMUX_SOCKET
+      ?? "/tmp/cmux.sock";
+
+    try {
+      const sock = createConnection(socketPath);
+      sock.on("error", () => {});
+      sock.write(cmd + "\n");
+      sock.end();
+    } catch {
+      // silently ignore
+    }
+  }
 
   function reportTokens(ctx: any) {
     const branch = ctx.sessionManager.getBranch();
@@ -23,20 +58,16 @@ export default function (pi: ExtensionAPI) {
     lastReportedCost = totalCost;
 
     const modelId = ctx.model?.id ?? "unknown";
+    const { socketCmd, cliArgs } = buildCommand(
+      totalCost, totalInput, totalOutput, totalCacheRead, totalCacheWrite, modelId
+    );
 
-    const args = [
-      "report-tokens",
-      "--cost", totalCost.toFixed(4),
-      "--input", String(totalInput),
-      "--output", String(totalOutput),
-      "--cache-read", String(totalCacheRead),
-      "--cache-write", String(totalCacheWrite),
-      "--model", modelId,
-    ];
-
-    // execFile avoids shell escaping issues and is non-blocking
-    execFile("cmux", args, { timeout: 3000 }, () => {
-      // silently ignore errors — cmux may not be running
+    // Try CLI first (handles socket discovery + workspace resolution),
+    // fall back to direct socket if CLI fails or isn't available.
+    execFile("cmux", cliArgs, { timeout: 3000 }, (error) => {
+      if (error) {
+        sendViaSocket(socketCmd);
+      }
     });
   }
 
