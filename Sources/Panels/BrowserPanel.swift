@@ -1671,6 +1671,9 @@ final class BrowserPanel: Panel, ObservableObject {
         isInspectionModeActive = false
         webView.evaluateJavaScript("window.__cmuxInspectCleanup && window.__cmuxInspectCleanup()") { _, _ in }
 
+        // Clean up the bridge file — picks are ephemeral, no persistence needed.
+        try? FileManager.default.removeItem(at: bridgeFileURL)
+
         #if DEBUG
         dlog("browser.inspect.disabled picked=\(inspectionPickCount)")
         #endif
