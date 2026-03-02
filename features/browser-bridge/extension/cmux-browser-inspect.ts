@@ -70,7 +70,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 
 	// ── Watcher state ─────────────────────────────────────────────────────
 	const surfaceId = process.env.CMUX_SURFACE_ID!;
-	let uiCtx: { pasteToEditor: (text: string) => void } | null = null;
+
 	/** Path to this agent's bridge file (scoped by its own surface ID). */
 	const bridgeFile = path.join(BRIDGE_DIR, `${surfaceId}.jsonl`);
 	let linesRead = 0;
@@ -79,7 +79,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 
 	// ── Bridge file processing ────────────────────────────────────────────
 
-	/** Read new lines from this agent's bridge file and send them as user messages. */
+	/** Read new lines from this agent's bridge file and deliver them to the chat. */
 	function processBridgeFile(): void {
 		try {
 			if (!fs.existsSync(bridgeFile)) return;
@@ -95,10 +95,13 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 				try {
 					const el = JSON.parse(line) as Record<string, unknown>;
 					const formatted = formatElement(el);
-					if (uiCtx) {
-						// Append to the editor so the user can add context before sending.
-						uiCtx.pasteToEditor(`${formatted}\n`);
-					}
+					// Add as a message in the chat without triggering a turn.
+					// The user can then reference it in their next prompt.
+					pi.sendMessage({
+						customType: "browser-pick",
+						content: formatted,
+						display: "user",
+					}, { triggerTurn: false });
 				} catch {
 					console.log(`[browser-bridge] malformed JSONL line: ${line}`);
 				}
@@ -176,15 +179,13 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	startWatching();
 
 	pi.on("session_start", async (_event, ctx) => {
-		uiCtx = ctx.ui;
 		startWatching();
 		ctx.ui.setStatus("browser-bridge", "● Browser");
 	});
 
-	// Also capture ctx on first turn if session_start was missed.
+	// Set status on first turn if session_start was missed.
 	let statusSet = false;
 	pi.on("turn_start", async (_event, ctx) => {
-		if (!uiCtx) uiCtx = ctx.ui;
 		if (!statusSet) {
 			statusSet = true;
 			ctx.ui.setStatus("browser-bridge", "● Browser");
