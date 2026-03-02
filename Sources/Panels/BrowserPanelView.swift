@@ -349,9 +349,6 @@ struct BrowserPanelView: View {
 #endif
             onRequestPanelFocus()
         }
-        .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
-            hasConnectedAgent = panel.resolveTargetTerminal() != nil
-        }
         .onAppear {
             hasConnectedAgent = panel.resolveTargetTerminal() != nil
             UserDefaults.standard.register(defaults: [
@@ -403,6 +400,7 @@ struct BrowserPanelView: View {
         .onChange(of: isFocused) { focused in
             // Ensure this view doesn't retain focus while hidden (bonsplit keepAllAlive).
             if focused {
+                hasConnectedAgent = panel.resolveTargetTerminal() != nil
                 applyPendingAddressBarFocusRequestIfNeeded()
                 autoFocusOmnibarIfBlank()
             } else {
