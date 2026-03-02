@@ -1,32 +1,21 @@
 import SwiftUI
 
-/// Sidebar widget showing aggregate token cost across active workspaces.
-/// Appears at the bottom of the sidebar, above the update pill / dev footer.
+/// Sidebar widget showing token cost for all workspaces in the window.
+/// Always visible at the bottom of the sidebar, above the update pill / dev footer.
 struct TokenCostSidebarWidget: View {
     @EnvironmentObject var tabManager: TabManager
-    @State private var isExpanded = false
-    @State private var hasEverReportedTokens = false
+    @State private var isExpanded = true
 
-    private var activeUsages: [(workspace: Workspace, usage: TokenUsageState)] {
-        tabManager.tabs.compactMap { ws in
-            ws.tokenUsage.map { (ws, $0) }
-        }
+    private var workspaceEntries: [(workspace: Workspace, usage: TokenUsageState?)] {
+        tabManager.tabs.map { ws in (workspace: ws, usage: ws.tokenUsage) }
     }
 
     private var totalCost: Double {
-        activeUsages.reduce(0) { $0 + $1.usage.cost }
+        tabManager.tabs.compactMap(\.tokenUsage?.cost).reduce(0, +)
     }
 
     private var totalTokens: Int {
-        activeUsages.reduce(0) { $0 + $1.usage.totalTokens }
-    }
-
-    private var shouldShow: Bool {
-        !activeUsages.isEmpty || hasEverReportedTokens
-    }
-
-    private var showExpandControls: Bool {
-        activeUsages.count > 1
+        tabManager.tabs.compactMap(\.tokenUsage?.totalTokens).reduce(0, +)
     }
 
     private var formattedTotalCost: String {
@@ -47,140 +36,90 @@ struct TokenCostSidebarWidget: View {
     }
 
     var body: some View {
-        if shouldShow {
-            VStack(spacing: 0) {
-                // Thin separator
-                Color(nsColor: .separatorColor)
-                    .frame(height: 1)
+        VStack(spacing: 0) {
+            // Thin separator
+            Color(nsColor: .separatorColor)
+                .frame(height: 1)
 
-                if activeUsages.isEmpty {
-                    // Grayed-out placeholder when no active usages
-                    inactiveRow
-                } else if showExpandControls {
-                    multiWorkspaceView
-                } else {
-                    singleWorkspaceView
-                }
-            }
-            .onChange(of: activeUsages.count) { newCount in
-                if newCount > 0 {
-                    hasEverReportedTokens = true
-                }
+            // Header: aggregate total, always visible
+            headerRow
+
+            // Per-workspace breakdown
+            if isExpanded {
+                perWorkspaceList
             }
         }
     }
 
-    // MARK: - Inactive (grayed out)
+    // MARK: - Header
 
-    private var inactiveRow: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "dollarsign.circle")
-                .font(.system(size: 10))
-            Text("$0.00")
-                .font(.system(size: 11, weight: .semibold))
-                .monospacedDigit()
-        }
-        .foregroundStyle(.secondary.opacity(0.5))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: - Single workspace
-
-    private var singleWorkspaceView: some View {
-        let usage = activeUsages[0].usage
-        return VStack(alignment: .leading, spacing: 2) {
+    private var headerRow: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isExpanded.toggle()
+            }
+        } label: {
             HStack(spacing: 4) {
                 Image(systemName: "dollarsign.circle")
-                    .font(.system(size: 10))
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
-                Text(usage.formattedCost)
+                Text(formattedTotalCost)
                     .font(.system(size: 11, weight: .semibold))
                     .monospacedDigit()
                     .contentTransition(.numericText())
-                    .animation(.default, value: usage.cost)
-                Text(usage.formattedTokens)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-            if let model = usage.displayModelName {
-                Text(model)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: - Multi workspace
-
-    private var multiWorkspaceView: some View {
-        VStack(spacing: 0) {
-            // Aggregate header row
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "dollarsign.circle")
-                        .font(.system(size: 10))
+                    .animation(.default, value: totalCost)
+                if totalTokens > 0 {
+                    Text("·")
                         .foregroundStyle(.secondary)
-                    Text(formattedTotalCost)
-                        .font(.system(size: 11, weight: .semibold))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                        .animation(.default, value: totalCost)
                     Text(formattedTotalTokens)
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 }
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-
-            // Expanded per-workspace rows
-            if isExpanded {
-                VStack(spacing: 2) {
-                    ForEach(activeUsages, id: \.workspace.id) { ws, usage in
-                        HStack(spacing: 4) {
-                            Text(ws.title)
-                                .font(.system(size: 9))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            if let model = usage.displayModelName {
-                                Text("·")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.tertiary)
-                                Text(model)
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.tertiary)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            Text(usage.formattedCost)
-                                .font(.system(size: 10, weight: .semibold))
-                                .monospacedDigit()
-                                .contentTransition(.numericText())
-                                .animation(.default, value: usage.cost)
-                        }
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 2)
-                    }
-                }
-                .padding(.bottom, 6)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
             }
         }
+        .buttonStyle(.plain)
+        .foregroundStyle(totalCost > 0 ? .primary : .secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+    }
+
+    // MARK: - Per-workspace list
+
+    private var perWorkspaceList: some View {
+        VStack(spacing: 2) {
+            ForEach(workspaceEntries, id: \.workspace.id) { ws, usage in
+                HStack(spacing: 4) {
+                    Text(ws.title)
+                        .font(.system(size: 9))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if let model = usage?.displayModelName {
+                        Text("·")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                        Text(model)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Text(usage?.formattedCost ?? "$0.00")
+                        .font(.system(size: 10, weight: .medium))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .animation(.default, value: usage?.cost ?? 0)
+                }
+                .foregroundStyle(.secondary.opacity(usage != nil ? 1.0 : 0.5))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(.bottom, 6)
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 }
