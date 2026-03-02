@@ -94,26 +94,22 @@ struct TokenCostSidebarWidget: View {
                 }
             }
 
-            // Per-agent breakdown
-            if isExpanded {
-                VStack(spacing: 0) {
-                    ForEach(entries, id: \.surfaceId) { entry in
-                        TokenCostAgentRow(
-                            workspaceTitle: entry.workspace.title,
-                            usage: entry.usage
-                        )
-                        .transition(.asymmetric(
-                            insertion: .opacity.combined(with: .move(edge: .top)).combined(with: .scale(scale: 0.95, anchor: .top)),
-                            removal: .opacity
-                        ))
-                    }
+            // Per-agent breakdown — clipped to simulate overflow-hidden
+            VStack(spacing: 0) {
+                ForEach(entries, id: \.surfaceId) { entry in
+                    TokenCostAgentRow(
+                        workspaceTitle: entry.workspace.title,
+                        usage: entry.usage
+                    )
+                    .transition(.opacity)
                 }
-                .padding(.bottom, 6)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-                .animation(.easeInOut(duration: 0.25), value: agentCount)
             }
+            .padding(.bottom, isExpanded ? 6 : 0)
+            .frame(maxHeight: isExpanded ? .infinity : 0)
+            .clipped()
+            .animation(.easeInOut(duration: 0.25), value: isExpanded)
+            .animation(.easeInOut(duration: 0.25), value: agentCount)
         }
-        .animation(.easeInOut(duration: 0.25), value: agentCount)
     }
 }
 
