@@ -110,6 +110,7 @@ struct TokenCostSidebarWidget: View {
             .padding(.bottom, isExpanded ? 6 : 0)
             .frame(maxHeight: isExpanded ? .infinity : 0)
             .clipped()
+            .allowsHitTesting(isExpanded)
             .animation(.easeInOut(duration: 0.25), value: isExpanded)
             .animation(.easeInOut(duration: 0.25), value: agentCount)
         }
