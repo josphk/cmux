@@ -155,7 +155,6 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 		// Fallback: 2-second polling (catches anything fs.watch misses)
 		pollInterval = setInterval(processBridgeFile, POLL_INTERVAL_MS);
 
-		console.log(`[browser-bridge] watching ${bridgeFile}`);
 	}
 
 	function stopWatching(): void {
@@ -170,7 +169,6 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 		// Remove presence marker.
 		try { fs.unlinkSync(presenceFile); } catch {}
 
-		console.log("[browser-bridge] watcher stopped");
 	}
 
 	// ── Events ────────────────────────────────────────────────────────────
