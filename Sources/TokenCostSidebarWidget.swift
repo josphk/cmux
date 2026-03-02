@@ -164,10 +164,13 @@ private struct TokenCostAgentRow: View {
         .background(
             RoundedRectangle(cornerRadius: 4)
                 .fill(Color(nsColor: .white).opacity(isHovered ? 0.06 : 0))
-                .animation(.easeInOut(duration: 0.15), value: isHovered)
         )
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
+        .transaction { t in
+            // Only animate for hover changes, not inherited container animations
+            if !isHovered { t.animation = nil }
+        }
         .animation(.easeInOut(duration: 0.15), value: isHovered)
         .onHover { hovering in
             isHovered = hovering
