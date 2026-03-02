@@ -4,24 +4,30 @@ import { createConnection } from "net";
 
 export default function (pi: ExtensionAPI) {
   let lastReportedCost = -1;
+  const surfaceId = process.env.CMUX_SURFACE_ID ?? "";
+  const workspaceId = process.env.CMUX_WORKSPACE_ID ?? "";
 
   function buildCommand(totalCost: number, totalInput: number, totalOutput: number,
     totalCacheRead: number, totalCacheWrite: number, modelId: string) {
-    return {
-      socketCmd: `report_tokens --cost=${totalCost.toFixed(4)}`
-        + ` --input=${totalInput} --output=${totalOutput}`
-        + ` --cache-read=${totalCacheRead} --cache-write=${totalCacheWrite}`
-        + ` --model=${modelId}`,
-      cliArgs: [
-        "report-tokens",
-        "--cost", totalCost.toFixed(4),
-        "--input", String(totalInput),
-        "--output", String(totalOutput),
-        "--cache-read", String(totalCacheRead),
-        "--cache-write", String(totalCacheWrite),
-        "--model", modelId,
-      ],
-    };
+    const socketCmd = `report_tokens --cost=${totalCost.toFixed(4)}`
+      + ` --input=${totalInput} --output=${totalOutput}`
+      + ` --cache-read=${totalCacheRead} --cache-write=${totalCacheWrite}`
+      + ` --model=${modelId}`
+      + (surfaceId ? ` --surface=${surfaceId}` : "")
+      + (workspaceId ? ` --tab=${workspaceId}` : "");
+
+    // CLI auto-resolves surface/workspace from env, but we pass explicitly too
+    const cliArgs = [
+      "report-tokens",
+      "--cost", totalCost.toFixed(4),
+      "--input", String(totalInput),
+      "--output", String(totalOutput),
+      "--cache-read", String(totalCacheRead),
+      "--cache-write", String(totalCacheWrite),
+      "--model", modelId,
+    ];
+
+    return { socketCmd, cliArgs };
   }
 
   function sendViaSocket(cmd: string) {

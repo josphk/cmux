@@ -1,19 +1,29 @@
 import SwiftUI
 
-/// Sidebar widget showing token cost for all workspaces in the window.
-/// Always visible at the bottom of the sidebar, above the update pill / dev footer.
+/// Sidebar widget showing token cost for all agents in the window.
+/// Always visible at the bottom of the sidebar. Each agent (pane/surface) gets its own line item.
 struct TokenCostSidebarWidget: View {
     @EnvironmentObject var tabManager: TabManager
     @State private var isExpanded = true
 
-    private var totalCost: Double {
+    /// Flat list of all agent entries across all workspaces.
+    private var agentEntries: [(workspace: Workspace, surfaceId: String, usage: TokenUsageState)] {
         _ = tabManager.tokenUsageGeneration
-        return tabManager.tabs.compactMap(\.tokenUsage?.cost).reduce(0, +)
+        var result: [(Workspace, String, TokenUsageState)] = []
+        for ws in tabManager.tabs {
+            for (surfaceId, usage) in ws.tokenUsageByAgent.sorted(by: { $0.key < $1.key }) {
+                result.append((ws, surfaceId, usage))
+            }
+        }
+        return result
+    }
+
+    private var totalCost: Double {
+        agentEntries.reduce(0) { $0 + $1.usage.cost }
     }
 
     private var totalTokens: Int {
-        _ = tabManager.tokenUsageGeneration
-        return tabManager.tabs.compactMap(\.tokenUsage?.totalTokens).reduce(0, +)
+        agentEntries.reduce(0) { $0 + $1.usage.totalTokens }
     }
 
     private var formattedTotalCost: String {
@@ -29,78 +39,80 @@ struct TokenCostSidebarWidget: View {
     var body: some View {
         // Read generation to establish SwiftUI dependency
         let _ = tabManager.tokenUsageGeneration
+        let entries = agentEntries
 
-        VStack(spacing: 0) {
-            Color(nsColor: .separatorColor)
-                .frame(height: 1)
+        if !entries.isEmpty {
+            VStack(spacing: 0) {
+                Color(nsColor: .separatorColor)
+                    .frame(height: 1)
 
-            // Header: clickable aggregate row
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "dollarsign.circle")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Text(formattedTotalCost)
-                        .font(.system(size: 11, weight: .semibold))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                        .animation(.default, value: totalCost)
-                    if totalTokens > 0 {
-                        Text("·")
-                            .foregroundStyle(.secondary)
-                        Text(formattedTotalTokens)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                // Header: clickable aggregate row
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
                     }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                }
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(totalCost > 0 ? .primary : .secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-
-            // Per-workspace breakdown
-            if isExpanded {
-                VStack(spacing: 2) {
-                    ForEach(tabManager.tabs) { ws in
-                        TokenCostWorkspaceRow(workspace: ws, generation: tabManager.tokenUsageGeneration)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "dollarsign.circle")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text(formattedTotalCost)
+                            .font(.system(size: 11, weight: .semibold))
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                            .animation(.default, value: totalCost)
+                        if totalTokens > 0 {
+                            Text("·")
+                                .foregroundStyle(.secondary)
+                            Text(formattedTotalTokens)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if entries.count > 1 {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.tertiary)
+                                .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        }
                     }
                 }
-                .padding(.bottom, 6)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+
+                // Per-agent breakdown (only shown when multiple agents)
+                if isExpanded && entries.count > 1 {
+                    VStack(spacing: 2) {
+                        ForEach(entries, id: \.surfaceId) { entry in
+                            TokenCostAgentRow(
+                                workspaceTitle: entry.workspace.title,
+                                usage: entry.usage
+                            )
+                        }
+                    }
+                    .padding(.bottom, 6)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
             }
         }
     }
 }
 
-// MARK: - Per-workspace row
+// MARK: - Per-agent row
 
-private struct TokenCostWorkspaceRow: View {
-    let workspace: Workspace
-    /// Passed from parent to force SwiftUI to re-diff this row when token data changes.
-    let generation: UInt64
-
-    private var usage: TokenUsageState? {
-        _ = generation
-        return workspace.tokenUsage
-    }
+private struct TokenCostAgentRow: View {
+    let workspaceTitle: String
+    let usage: TokenUsageState
 
     var body: some View {
         HStack(spacing: 4) {
-            Text(workspace.title)
+            Text(workspaceTitle)
                 .font(.system(size: 9))
                 .lineLimit(1)
                 .truncationMode(.tail)
-            if let model = usage?.displayModelName {
+            if let model = usage.displayModelName {
                 Text("·")
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
@@ -110,13 +122,13 @@ private struct TokenCostWorkspaceRow: View {
                     .lineLimit(1)
             }
             Spacer()
-            Text(usage?.formattedCost ?? "$0.00")
+            Text(usage.formattedCost)
                 .font(.system(size: 10, weight: .medium))
                 .monospacedDigit()
                 .contentTransition(.numericText())
-                .animation(.default, value: usage?.cost ?? 0)
+                .animation(.default, value: usage.cost)
         }
-        .foregroundStyle(.secondary.opacity(usage != nil ? 1.0 : 0.5))
+        .foregroundStyle(.secondary)
         .padding(.horizontal, 10)
         .padding(.vertical, 2)
     }

@@ -12187,6 +12187,9 @@ class TerminalController {
         guard let costStr = parsed.options["cost"], let cost = Double(costStr) else {
             return "ERROR: --cost required"
         }
+        guard let surfaceKey = parsed.options["surface"], !surfaceKey.isEmpty else {
+            return "ERROR: --surface required (set automatically by CLI via $CMUX_SURFACE_ID)"
+        }
         var state = TokenUsageState()
         state.cost = cost
         if let v = parsed.options["input"], let n = Int(v) { state.input = n }
@@ -12200,18 +12203,24 @@ class TerminalController {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             guard let tab = self.resolveTabForReport(args) else { return }
-            tab.tokenUsage = state
+            tab.tokenUsageByAgent[surfaceKey] = state
             self.tabManager?.tokenUsageGeneration &+= 1
         }
         return "OK"
     }
 
     private func handleClearTokens(_ args: String) -> String {
+        let parsed = parseOptions(args)
+        let surfaceKey = parsed.options["surface"]
         // Parse off-main, async-mutate on main (threading policy for telemetry).
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             guard let tab = self.resolveTabForReport(args) else { return }
-            tab.tokenUsage = nil
+            if let key = surfaceKey, !key.isEmpty {
+                tab.tokenUsageByAgent.removeValue(forKey: key)
+            } else {
+                tab.tokenUsageByAgent.removeAll()
+            }
             self.tabManager?.tokenUsageGeneration &+= 1
         }
         return "OK"

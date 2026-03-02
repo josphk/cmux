@@ -970,7 +970,18 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var panelPullRequests: [UUID: SidebarPullRequestState] = [:]
     @Published var surfaceListeningPorts: [UUID: [Int]] = [:]
     @Published var listeningPorts: [Int] = []
-    @Published var tokenUsage: TokenUsageState?
+    /// Token usage keyed by surface (pane) ID. Multiple agents can run in different panes.
+    var tokenUsageByAgent: [String: TokenUsageState] = [:]
+
+    /// Aggregate cost across all agents in this workspace.
+    var totalTokenCost: Double {
+        tokenUsageByAgent.values.reduce(0) { $0 + $1.cost }
+    }
+
+    /// Aggregate tokens across all agents in this workspace.
+    var totalTokenCount: Int {
+        tokenUsageByAgent.values.reduce(0) { $0 + $1.totalTokens }
+    }
     var surfaceTTYNames: [UUID: String] = [:]
     private var restoredTerminalScrollbackByPanelId: [UUID: String] = [:]
 
