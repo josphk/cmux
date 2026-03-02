@@ -43,7 +43,7 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  pi.on("agent_turn_complete", async (_event, ctx) => {
+  pi.on("agent_end", async (_event, ctx) => {
     reportTokens(ctx);
   });
 }
