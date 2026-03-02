@@ -1654,6 +1654,11 @@ final class BrowserPanel: Panel, ObservableObject {
         isInspectionModeActive = true
         inspectionPickCount = 0
 
+        // Write inspection-active marker so extensions show their indicator.
+        let inspectingFile = Self.bridgeBaseDir.appendingPathComponent("inspecting")
+        try? FileManager.default.createDirectory(at: Self.bridgeBaseDir, withIntermediateDirectories: true)
+        try? "1".write(to: inspectingFile, atomically: true, encoding: .utf8)
+
         webView.evaluateJavaScript(Self.inspectionModeScript) { [weak self] _, error in
             guard let self else { return }
             if let error {
@@ -1673,8 +1678,8 @@ final class BrowserPanel: Panel, ObservableObject {
         isInspectionModeActive = false
         webView.evaluateJavaScript("window.__cmuxInspectCleanup && window.__cmuxInspectCleanup()") { _, _ in }
 
-        // No bridge file cleanup needed — files are ephemeral per-pick and
-        // each agent's extension manages its own read offset.
+        // Remove inspection-active marker.
+        try? FileManager.default.removeItem(at: Self.bridgeBaseDir.appendingPathComponent("inspecting"))
 
         #if DEBUG
         dlog("browser.inspect.disabled picked=\(inspectionPickCount)")

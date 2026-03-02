@@ -179,17 +179,19 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 		setStatus: (key: string, text: string | undefined) => void;
 	} | null = null;
 
+	const inspectingFile = path.join(BRIDGE_DIR, "inspecting");
+
 	function checkActiveTarget(): void {
 		if (!uiRef) return;
 		try {
+			const isInspecting = fs.existsSync(inspectingFile);
 			const target = fs.readFileSync(activeTargetFile, "utf-8").trim();
-			if (target === surfaceId) {
+			if (isInspecting && target === surfaceId) {
 				uiRef.setStatus("browser-bridge", "● Ready for browser picks");
 			} else {
 				uiRef.setStatus("browser-bridge", undefined);
 			}
 		} catch {
-			// File doesn't exist yet — clear status.
 			uiRef.setStatus("browser-bridge", undefined);
 		}
 	}
@@ -198,7 +200,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 		if (targetWatcher) return;
 		try {
 			targetWatcher = fs.watch(BRIDGE_DIR, (_eventType, filename) => {
-				if (filename === "active-target") checkActiveTarget();
+				if (filename === "active-target" || filename === "inspecting") checkActiveTarget();
 			});
 			targetWatcher.on("error", () => {});
 		} catch {}
