@@ -5554,14 +5554,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         // Toggle browser inspection/picker mode: Cmd+Shift+I
         if flags == [.command, .shift] && chars == "I" {
-            if let focusedPanel = tabManager?.focusedBrowserPanel {
-                if focusedPanel.isInspectionModeActive {
-                    focusedPanel.disableInspectionMode()
+            // Try focused browser first, then find any browser in the workspace.
+            let browserPanel: BrowserPanel? = tabManager?.focusedBrowserPanel
+                ?? tabManager?.selectedTab?.panels.values.first(where: { $0 is BrowserPanel }) as? BrowserPanel
+            if let browserPanel {
+                if browserPanel.isInspectionModeActive {
+                    browserPanel.disableInspectionMode()
                 } else {
-                    focusedPanel.enableInspectionMode()
+                    browserPanel.enableInspectionMode()
                 }
                 #if DEBUG
-                dlog("shortcut.action name=toggleBrowserInspection panel=\(focusedPanel.id.uuidString.prefix(5)) active=\(focusedPanel.isInspectionModeActive)")
+                dlog("shortcut.action name=toggleBrowserInspection panel=\(browserPanel.id.uuidString.prefix(5)) active=\(browserPanel.isInspectionModeActive)")
                 #endif
                 return true
             }
