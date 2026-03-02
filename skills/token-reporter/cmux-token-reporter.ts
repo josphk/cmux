@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { execFile } from "child_process";
+import { execFile, execFileSync, spawnSync } from "child_process";
 import { createConnection } from "net";
 
 export default function (pi: ExtensionAPI) {
@@ -83,25 +83,27 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
-    // Mark this agent as inactive in the widget
-    execFile("cmux", ["deactivate-tokens"], { timeout: 3000 }, (error) => {
-      if (error) {
-        // Fallback to direct socket
-        const socketPath = process.env.CMUX_SOCKET_PATH
-          ?? process.env.CMUX_SOCKET
-          ?? "/tmp/cmux.sock";
-        const cmd = `deactivate_tokens`
-          + (surfaceId ? ` --surface=${surfaceId}` : "")
-          + (workspaceId ? ` --tab=${workspaceId}` : "");
-        try {
-          const sock = createConnection(socketPath);
-          sock.on("error", () => {});
-          sock.write(cmd + "\n");
-          sock.end();
-        } catch {
-          // silently ignore
-        }
+    // Must be synchronous — pi exits immediately after this handler returns.
+    // execFile/createConnection are async and won't complete before exit.
+    const cmd = `deactivate_tokens`
+      + (surfaceId ? ` --surface=${surfaceId}` : "")
+      + (workspaceId ? ` --tab=${workspaceId}` : "");
+
+    try {
+      execFileSync("cmux", ["deactivate-tokens"], { timeout: 3000 });
+    } catch {
+      // CLI failed (wrong binary on PATH), fall back to direct socket via nc
+      const socketPath = process.env.CMUX_SOCKET_PATH
+        ?? process.env.CMUX_SOCKET
+        ?? "/tmp/cmux.sock";
+      try {
+        spawnSync("nc", ["-U", "-w", "1", socketPath], {
+          input: cmd + "\n",
+          timeout: 3000,
+        });
+      } catch {
+        // silently ignore
       }
-    });
+    }
   });
 }
