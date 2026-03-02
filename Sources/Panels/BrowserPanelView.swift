@@ -562,16 +562,21 @@ struct BrowserPanelView: View {
             return
         }
 
-        // Find the terminal panel that has an active agent (.listening file).
-        let terminalIds = workspace.panels
-            .filter { $1.panelType == .terminal }
-            .map { $0.key }
-        guard !terminalIds.isEmpty else { return }
-
+        // Prefer the last focused terminal if it has an active agent.
         let bridgeDir = URL(fileURLWithPath: "/tmp/cmux-browser-bridge", isDirectory: true)
-        let targetId = terminalIds.first(where: { id in
+        func hasAgent(_ id: UUID) -> Bool {
             FileManager.default.fileExists(atPath: bridgeDir.appendingPathComponent("\(id.uuidString).listening").path)
-        })
+        }
+
+        let targetId: UUID?
+        if let last = workspace.lastFocusedTerminalPanelId, hasAgent(last) {
+            targetId = last
+        } else {
+            // Fall back to any terminal with an active agent.
+            targetId = workspace.panels
+                .filter { $1.panelType == .terminal }
+                .first(where: { hasAgent($0.key) })?.key
+        }
         guard let targetId else { return }
 
         panel.enableInspectionMode(targetSurfaceId: targetId.uuidString)

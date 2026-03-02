@@ -913,6 +913,9 @@ final class Workspace: Identifiable, ObservableObject {
     private var isProgrammaticSplit = false
 
     /// Last terminal panel used as an inheritance source (typically last focused terminal).
+    /// The most recently focused terminal panel ID (used by browser-bridge to target picks).
+    private(set) var lastFocusedTerminalPanelId: UUID?
+
     private var lastTerminalConfigInheritancePanelId: UUID?
     /// Last known terminal font points from inheritance sources. Used as fallback when
     /// no live terminal surface is currently available.
@@ -3526,6 +3529,7 @@ extension Workspace: BonsplitDelegate {
             maybeAutoFocusBrowserAddressBarOnPanelFocus(browserPanel, trigger: .standard)
         }
         if let terminalPanel = panel as? TerminalPanel {
+            lastFocusedTerminalPanelId = terminalPanel.id
             rememberTerminalConfigInheritanceSource(terminalPanel)
         }
         let isManuallyUnread = manualUnreadPanelIds.contains(panelId)
