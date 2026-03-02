@@ -104,15 +104,15 @@ struct TokenCostSidebarWidget: View {
                             focusAgent(workspace: entry.workspace, surfaceId: entry.surfaceId)
                         }
                     )
-                    .transition(.identity)
                 }
             }
             .padding(.bottom, isExpanded ? 6 : 0)
-            .frame(maxHeight: isExpanded ? .infinity : 0)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxHeight: isExpanded ? 500 : 0, alignment: .top)
             .clipped()
             .allowsHitTesting(isExpanded)
-            .animation(.easeInOut(duration: 0.25), value: isExpanded)
-            .animation(.easeInOut(duration: 0.25), value: agentCount)
+            .animation(.easeInOut(duration: 0.2), value: isExpanded)
+            .animation(.easeInOut(duration: 0.2), value: agentCount)
         }
     }
 
@@ -167,10 +167,6 @@ private struct TokenCostAgentRow: View {
         )
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
-        .transaction { t in
-            // Only animate for hover changes, not inherited container animations
-            if !isHovered { t.animation = nil }
-        }
         .animation(.easeInOut(duration: 0.15), value: isHovered)
         .onHover { hovering in
             isHovered = hovering
