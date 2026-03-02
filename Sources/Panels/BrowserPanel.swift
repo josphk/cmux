@@ -1338,6 +1338,17 @@ final class BrowserPanel: Panel, ObservableObject {
     /// Increment to request a UI-only flash highlight (e.g. from a keyboard shortcut).
     @Published private(set) var focusFlashToken: Int = 0
 
+    // MARK: - Inspection mode (browser-bridge)
+
+    /// Whether browser inspection/picker mode is active.
+    @Published private(set) var isInspectionModeActive: Bool = false
+
+    /// Count of elements picked in the current inspection session.
+    @Published private(set) var inspectionPickCount: Int = 0
+
+    /// The surface ID for this browser panel (used for bridge file scoping).
+    var inspectionSurfaceId: String = ""
+
     /// Sticky omnibar-focus intent. This survives view mount timing races and is
     /// cleared only after BrowserPanelView acknowledges handling it.
     @Published private(set) var pendingAddressBarFocusRequestId: UUID?
@@ -1418,6 +1429,11 @@ final class BrowserPanel: Panel, ObservableObject {
             )
         )
 
+        // Register message handler for browser inspection/picker mode (browser-bridge).
+        // The handler reference is stored as a weak wrapper to avoid retain cycles.
+        let inspectHandler = InspectionMessageHandler()
+        config.userContentController.add(inspectHandler, name: "cmuxInspect")
+
         // Set up web view
         let webView = CmuxWebView(frame: .zero, configuration: config)
         webView.allowsBackForwardNavigationGestures = true
@@ -1447,6 +1463,15 @@ final class BrowserPanel: Panel, ObservableObject {
             Task { @MainActor [weak self] in
                 self?.refreshFavicon(from: webView)
                 self?.applyBrowserThemeModeIfNeeded()
+            }
+        }
+        navDelegate.didCommitNavigation = { [weak self] in
+            Task { @MainActor in
+                guard let self, self.isInspectionModeActive else { return }
+                self.disableInspectionMode()
+                #if DEBUG
+                dlog("browser.inspect.navigationGuard: auto-cancelled inspection on page commit")
+                #endif
             }
         }
         navDelegate.didFailNavigation = { [weak self] _, failedURL in
@@ -1509,6 +1534,9 @@ final class BrowserPanel: Panel, ObservableObject {
         setupObservers()
         applyBrowserThemeModeIfNeeded()
 
+        // Wire the inspection message handler back to self now that init is complete.
+        inspectHandler.panel = self
+
         // Navigate to initial URL if provided
         if let url = initialURL {
             shouldRenderWebView = true
@@ -1546,6 +1574,102 @@ final class BrowserPanel: Panel, ObservableObject {
 
     func triggerFlash() {
         focusFlashToken &+= 1
+    }
+
+    // MARK: - Inspection mode (browser-bridge)
+
+    /// The JS injection script for inspection mode. Loaded once from the bundled file.
+    private static let inspectionModeScript: String = {
+        // Embedded from features/browser-bridge/inspection-mode.js
+        guard let url = Bundle.main.url(forResource: "inspection-mode", withExtension: "js"),
+              let script = try? String(contentsOf: url, encoding: .utf8) else {
+            // Fallback: load from the features directory during development
+            let devPath = "features/browser-bridge/inspection-mode.js"
+            if let script = try? String(contentsOfFile: devPath) {
+                return script
+            }
+            NSLog("BrowserPanel: inspection-mode.js not found in bundle or dev path")
+            return ""
+        }
+        return script
+    }()
+
+    /// File URL for the JSONL bridge file (one per surface, scoped by surfaceId).
+    var bridgeFileURL: URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-bridge")
+            .appendingPathComponent("\(inspectionSurfaceId).jsonl")
+    }
+
+    func enableInspectionMode() {
+        guard !isInspectionModeActive, !isShowingNewTabPage else { return }
+        isInspectionModeActive = true
+        inspectionPickCount = 0
+
+        // Clear any stale bridge file from previous session.
+        clearBridgeFile()
+
+        webView.evaluateJavaScript(Self.inspectionModeScript) { [weak self] _, error in
+            guard let self else { return }
+            if let error {
+                NSLog("BrowserPanel inspectionMode inject error: %@", error.localizedDescription)
+                self.isInspectionModeActive = false
+                return
+            }
+            #if DEBUG
+            dlog("browser.inspect.enabled surfaceId=\(self.inspectionSurfaceId)")
+            #endif
+        }
+    }
+
+    func disableInspectionMode() {
+        guard isInspectionModeActive else { return }
+        isInspectionModeActive = false
+        webView.evaluateJavaScript("window.__cmuxInspectCleanup && window.__cmuxInspectCleanup()") { _, _ in }
+
+        #if DEBUG
+        dlog("browser.inspect.disabled picked=\(inspectionPickCount)")
+        #endif
+    }
+
+    func toggleInspectionMode() {
+        isInspectionModeActive ? disableInspectionMode() : enableInspectionMode()
+    }
+
+    /// Handle an element pick from the JS injection (called by InspectionMessageHandler).
+    func handleInspectedElement(_ data: [String: Any]) {
+        inspectionPickCount += 1
+
+        let bridgeDir = bridgeFileURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: bridgeDir, withIntermediateDirectories: true)
+
+        var payload = data
+        payload["timestamp"] = ISO8601DateFormatter().string(from: Date())
+        payload["surface_id"] = inspectionSurfaceId
+        payload["pick_index"] = inspectionPickCount
+        payload["event_id"] = UUID().uuidString
+
+        if let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+           var line = String(data: jsonData, encoding: .utf8) {
+            line += "\n"
+
+            if let handle = try? FileHandle(forWritingTo: bridgeFileURL) {
+                handle.seekToEndOfFile()
+                handle.write(line.data(using: .utf8)!)
+                handle.closeFile()
+            } else {
+                // First pick — create the file.
+                try? line.write(to: bridgeFileURL, atomically: true, encoding: .utf8)
+            }
+        }
+
+        #if DEBUG
+        dlog("browser.inspect.pick #\(inspectionPickCount) selector=\(data["selector"] ?? "") role=\(data["role"] ?? "")")
+        #endif
+    }
+
+    private func clearBridgeFile() {
+        try? FileManager.default.removeItem(at: bridgeFileURL)
     }
 
     func sessionNavigationHistorySnapshot() -> (
@@ -2942,6 +3066,7 @@ func browserNavigationShouldOpenInNewTab(
 
 private class BrowserNavigationDelegate: NSObject, WKNavigationDelegate {
     var didFinish: ((WKWebView) -> Void)?
+    var didCommitNavigation: (() -> Void)?
     var didFailNavigation: ((WKWebView, String) -> Void)?
     var openInNewTab: ((URL) -> Void)?
     var shouldBlockInsecureHTTPNavigation: ((URL) -> Bool)?
@@ -2954,6 +3079,10 @@ private class BrowserNavigationDelegate: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         lastAttemptedURL = webView.url
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        didCommitNavigation?()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -3392,6 +3521,26 @@ private class BrowserUIDelegate: NSObject, WKUIDelegate {
             } else {
                 completionHandler(nil)
             }
+        }
+    }
+}
+
+// MARK: - Inspection Message Handler (browser-bridge)
+
+/// WKScriptMessageHandler that receives element picks from the inspection mode JS
+/// and forwards them to the owning BrowserPanel.
+/// Uses a weak reference to avoid retain cycles with WKUserContentController.
+private class InspectionMessageHandler: NSObject, WKScriptMessageHandler {
+    weak var panel: BrowserPanel?
+
+    func userContentController(
+        _ controller: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        guard message.name == "cmuxInspect",
+              let dict = message.body as? [String: Any] else { return }
+        Task { @MainActor [weak self] in
+            self?.panel?.handleInspectedElement(dict)
         }
     }
 }
