@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { createConnection } from "net";
+import { execFile } from "child_process";
 
 export default function (pi: ExtensionAPI) {
   let lastReportedCost = -1;
@@ -22,25 +22,22 @@ export default function (pi: ExtensionAPI) {
     if (Math.abs(totalCost - lastReportedCost) < 0.001) return;
     lastReportedCost = totalCost;
 
-    const socketPath = process.env.CMUX_SOCKET_PATH
-      ?? process.env.CMUX_SOCKET
-      ?? "/tmp/cmux.sock";
-
     const modelId = ctx.model?.id ?? "unknown";
 
-    const cmd = `report_tokens --cost=${totalCost.toFixed(4)}`
-      + ` --input=${totalInput} --output=${totalOutput}`
-      + ` --cache-read=${totalCacheRead} --cache-write=${totalCacheWrite}`
-      + ` --model=${modelId}`;
+    const args = [
+      "report-tokens",
+      "--cost", totalCost.toFixed(4),
+      "--input", String(totalInput),
+      "--output", String(totalOutput),
+      "--cache-read", String(totalCacheRead),
+      "--cache-write", String(totalCacheWrite),
+      "--model", modelId,
+    ];
 
-    try {
-      const sock = createConnection(socketPath);
-      sock.on("error", () => {}); // silently ignore connection errors
-      sock.write(cmd + "\n");
-      sock.end();
-    } catch {
-      // cmux may not be running — silently ignore
-    }
+    // execFile avoids shell escaping issues and is non-blocking
+    execFile("cmux", args, { timeout: 3000 }, () => {
+      // silently ignore errors — cmux may not be running
+    });
   }
 
   pi.on("agent_end", async (_event, ctx) => {

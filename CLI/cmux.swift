@@ -1422,6 +1422,36 @@ struct CMUXCLI {
             let response = try sendV1Command("sidebar_state --tab=\(wsId)", client: client)
             print(response)
 
+        case "report-tokens":
+            let (cost, r1) = parseOption(commandArgs, name: "--cost")
+            let (input, r2) = parseOption(r1, name: "--input")
+            let (output, r3) = parseOption(r2, name: "--output")
+            let (cacheRead, r4) = parseOption(r3, name: "--cache-read")
+            let (cacheWrite, r5) = parseOption(r4, name: "--cache-write")
+            let (model, r6) = parseOption(r5, name: "--model")
+            let (wsFlag, _) = parseOption(r6, name: "--workspace")
+            guard let cost else {
+                throw CLIError(message: "report-tokens requires --cost=<usd>")
+            }
+            let workspaceArg = wsFlag ?? (windowId == nil ? ProcessInfo.processInfo.environment["CMUX_WORKSPACE_ID"] : nil)
+            let wsId = try resolveWorkspaceId(workspaceArg, client: client)
+            var socketCmd = "report_tokens --cost=\(cost)"
+            if let input { socketCmd += " --input=\(input)" }
+            if let output { socketCmd += " --output=\(output)" }
+            if let cacheRead { socketCmd += " --cache-read=\(cacheRead)" }
+            if let cacheWrite { socketCmd += " --cache-write=\(cacheWrite)" }
+            if let model { socketCmd += " --model=\(socketQuote(model))" }
+            socketCmd += " --tab=\(wsId)"
+            let response = try sendV1Command(socketCmd, client: client)
+            print(response)
+
+        case "clear-tokens":
+            let (wsFlag, _) = parseOption(commandArgs, name: "--workspace")
+            let workspaceArg = wsFlag ?? (windowId == nil ? ProcessInfo.processInfo.environment["CMUX_WORKSPACE_ID"] : nil)
+            let wsId = try resolveWorkspaceId(workspaceArg, client: client)
+            let response = try sendV1Command("clear_tokens --tab=\(wsId)", client: client)
+            print(response)
+
         case "set-app-focus":
             guard let value = commandArgs.first else { throw CLIError(message: "set-app-focus requires a value") }
             let response = try sendV1Command("set_app_focus \(value)", client: client)
@@ -4409,6 +4439,40 @@ struct CMUXCLI {
               cmux sidebar-state
               cmux sidebar-state --workspace workspace:2
             """
+        case "report-tokens":
+            return """
+            Usage: cmux report-tokens --cost <usd> [flags]
+
+            Report token usage and cost for the current workspace. Used by coding
+            agent extensions (pi, Claude Code, Aider) to update the sidebar cost widget.
+
+            Flags:
+              --cost <usd>           Required. Total cost in USD.
+              --input <n>            Input tokens.
+              --output <n>           Output tokens.
+              --cache-read <n>       Cache read tokens.
+              --cache-write <n>      Cache write tokens.
+              --model <name>         Model identifier (e.g. claude-sonnet-4-20250514).
+              --workspace <id|ref>   Target workspace (default: $CMUX_WORKSPACE_ID)
+
+            Example:
+              cmux report-tokens --cost 0.42 --input 50000 --output 10000 --model claude-sonnet-4
+              cmux report-tokens --cost 1.23 --workspace workspace:2
+            """
+
+        case "clear-tokens":
+            return """
+            Usage: cmux clear-tokens [flags]
+
+            Clear token usage data for a workspace.
+
+            Flags:
+              --workspace <id|ref>   Target workspace (default: $CMUX_WORKSPACE_ID)
+
+            Example:
+              cmux clear-tokens
+            """
+
         case "set-app-focus":
             return """
             Usage: cmux set-app-focus <active|inactive|clear>
@@ -6392,6 +6456,8 @@ struct CMUXCLI {
           clear-log [--workspace <id|ref>]
           list-log [--limit <n>] [--workspace <id|ref>]
           sidebar-state [--workspace <id|ref>]
+          report-tokens --cost <usd> [--input <n>] [--output <n>] [--cache-read <n>] [--cache-write <n>] [--model <name>] [--workspace <id|ref>]
+          clear-tokens [--workspace <id|ref>]
 
           set-app-focus <active|inactive|clear>
           simulate-app-active
