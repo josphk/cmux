@@ -349,7 +349,11 @@ struct BrowserPanelView: View {
 #endif
             onRequestPanelFocus()
         }
+        .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
+            hasConnectedAgent = panel.resolveTargetTerminal() != nil
+        }
         .onAppear {
+            hasConnectedAgent = panel.resolveTargetTerminal() != nil
             UserDefaults.standard.register(defaults: [
                 BrowserSearchSettings.searchEngineKey: BrowserSearchSettings.defaultSearchEngine.rawValue,
                 BrowserSearchSettings.searchSuggestionsEnabledKey: BrowserSearchSettings.defaultSearchSuggestionsEnabled,
@@ -579,9 +583,7 @@ struct BrowserPanelView: View {
         }
     }
 
-    private var hasConnectedAgent: Bool {
-        panel.resolveTargetTerminal() != nil
-    }
+    @State private var hasConnectedAgent: Bool = false
 
     private var inspectionPickerButton: some View {
         let connected = panel.isInspectionModeActive || hasConnectedAgent
