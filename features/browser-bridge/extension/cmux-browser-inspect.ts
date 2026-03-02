@@ -162,11 +162,21 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 
 	// ── Events ────────────────────────────────────────────────────────────
 
+	// Start watching immediately (extension may load after session_start fires).
+	startWatching();
+
 	pi.on("session_start", async (_event, ctx) => {
 		startWatching();
-		const theme = ctx.ui.theme;
-		const dot = theme.fg("success", "●");
-		ctx.ui.setStatus("browser-bridge", dot + theme.fg("dim", " Browser"));
+		ctx.ui.setStatus("browser-bridge", "● Browser");
+	});
+
+	// Also set status on first turn if session_start was missed.
+	let statusSet = false;
+	pi.on("turn_start", async (_event, ctx) => {
+		if (!statusSet) {
+			statusSet = true;
+			ctx.ui.setStatus("browser-bridge", "● Browser");
+		}
 	});
 
 	pi.on("session_shutdown", async () => {
