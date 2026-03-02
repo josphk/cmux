@@ -564,6 +564,8 @@ class TabManager: ObservableObject {
 
     @Published var tabs: [Workspace] = []
     @Published private(set) var isWorkspaceCycleHot: Bool = false
+    /// Bumped when any workspace's token usage changes. Observed by TokenCostSidebarWidget.
+    @Published var tokenUsageGeneration: UInt64 = 0
 
     /// Global monotonically increasing counter for CMUX_PORT ordinal assignment.
     /// Static so port ranges don't overlap across multiple windows (each window has its own TabManager).

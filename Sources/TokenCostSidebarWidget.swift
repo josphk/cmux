@@ -1,4 +1,3 @@
-import Combine
 import SwiftUI
 
 /// Sidebar widget showing token cost for all workspaces in the window.
@@ -6,22 +5,14 @@ import SwiftUI
 struct TokenCostSidebarWidget: View {
     @EnvironmentObject var tabManager: TabManager
     @State private var isExpanded = true
-    /// Bumped whenever any workspace publishes a change, forcing the header to re-read costs.
-    @State private var changeGeneration: UInt64 = 0
-
-    /// Merged publisher that fires when any workspace in the tab list changes.
-    private var anyWorkspaceChanged: AnyPublisher<Void, Never> {
-        let publishers = tabManager.tabs.map { $0.objectWillChange.map { _ in () } }
-        return Publishers.MergeMany(publishers).eraseToAnyPublisher()
-    }
 
     private var totalCost: Double {
-        _ = changeGeneration // force dependency on the generation counter
+        _ = tabManager.tokenUsageGeneration
         return tabManager.tabs.compactMap(\.tokenUsage?.cost).reduce(0, +)
     }
 
     private var totalTokens: Int {
-        _ = changeGeneration
+        _ = tabManager.tokenUsageGeneration
         return tabManager.tabs.compactMap(\.tokenUsage?.totalTokens).reduce(0, +)
     }
 
@@ -36,6 +27,9 @@ struct TokenCostSidebarWidget: View {
     }
 
     var body: some View {
+        // Read generation to establish SwiftUI dependency
+        let _ = tabManager.tokenUsageGeneration
+
         VStack(spacing: 0) {
             Color(nsColor: .separatorColor)
                 .frame(height: 1)
@@ -78,27 +72,27 @@ struct TokenCostSidebarWidget: View {
             if isExpanded {
                 VStack(spacing: 2) {
                     ForEach(tabManager.tabs) { ws in
-                        TokenCostWorkspaceRow(workspace: ws)
+                        TokenCostWorkspaceRow(workspace: ws, generation: tabManager.tokenUsageGeneration)
                     }
                 }
                 .padding(.bottom, 6)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .onReceive(anyWorkspaceChanged) { _ in
-            changeGeneration &+= 1
-        }
     }
 }
 
 // MARK: - Per-workspace row
 
-/// Each row subscribes to its own workspace via @ObservedObject,
-/// so SwiftUI re-renders when tokenUsage changes on that workspace.
 private struct TokenCostWorkspaceRow: View {
-    @ObservedObject var workspace: Workspace
+    let workspace: Workspace
+    /// Passed from parent to force SwiftUI to re-diff this row when token data changes.
+    let generation: UInt64
 
-    private var usage: TokenUsageState? { workspace.tokenUsage }
+    private var usage: TokenUsageState? {
+        _ = generation
+        return workspace.tokenUsage
+    }
 
     var body: some View {
         HStack(spacing: 4) {

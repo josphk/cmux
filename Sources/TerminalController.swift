@@ -12201,6 +12201,7 @@ class TerminalController {
             guard let self else { return }
             guard let tab = self.resolveTabForReport(args) else { return }
             tab.tokenUsage = state
+            self.tabManager?.tokenUsageGeneration &+= 1
         }
         return "OK"
     }
@@ -12211,6 +12212,7 @@ class TerminalController {
             guard let self else { return }
             guard let tab = self.resolveTabForReport(args) else { return }
             tab.tokenUsage = nil
+            self.tabManager?.tokenUsageGeneration &+= 1
         }
         return "OK"
     }
