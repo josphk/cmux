@@ -99,7 +99,10 @@ struct TokenCostSidebarWidget: View {
                 ForEach(entries, id: \.surfaceId) { entry in
                     TokenCostAgentRow(
                         workspaceTitle: entry.workspace.title,
-                        usage: entry.usage
+                        usage: entry.usage,
+                        onTap: {
+                            focusAgent(workspace: entry.workspace, surfaceId: entry.surfaceId)
+                        }
                     )
                     .transition(.opacity)
                 }
@@ -111,6 +114,16 @@ struct TokenCostSidebarWidget: View {
             .animation(.easeInOut(duration: 0.25), value: agentCount)
         }
     }
+
+    private func focusAgent(workspace: Workspace, surfaceId: String) {
+        guard let surfaceUUID = UUID(uuidString: surfaceId) else { return }
+        // Select the workspace if it's not already selected
+        if tabManager.selectedTabId != workspace.id {
+            tabManager.selectWorkspace(workspace)
+        }
+        // Focus the specific pane
+        tabManager.focusSurface(tabId: workspace.id, surfaceId: surfaceUUID)
+    }
 }
 
 // MARK: - Per-agent row
@@ -118,6 +131,9 @@ struct TokenCostSidebarWidget: View {
 private struct TokenCostAgentRow: View {
     let workspaceTitle: String
     let usage: TokenUsageState
+    var onTap: () -> Void = {}
+
+    @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 4) {
@@ -141,8 +157,22 @@ private struct TokenCostAgentRow: View {
                 .contentTransition(.numericText())
                 .animation(.default, value: usage.cost)
         }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 2)
+        .foregroundStyle(isHovered ? .primary : .secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color(nsColor: .white).opacity(isHovered ? 0.06 : 0))
+        )
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+        .onTapGesture {
+            onTap()
+        }
     }
 }
