@@ -5553,7 +5553,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         // Toggle browser inspection/picker mode: Cmd+Shift+I
-        if flags == [.command, .option] && event.keyCode == 34 /* i */ {
+        if flags == [.command, .shift] && (chars == "I" || event.keyCode == 34) {
             // Try focused browser first, then find any browser in the workspace.
             let browserPanel: BrowserPanel? = tabManager?.focusedBrowserPanel
                 ?? tabManager?.selectedTab?.panels.values.first(where: { $0 is BrowserPanel }) as? BrowserPanel

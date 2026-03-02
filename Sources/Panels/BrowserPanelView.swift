@@ -569,7 +569,7 @@ struct BrowserPanelView: View {
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                 Spacer()
-                Text("⌥⌘I to finish")
+                Text("⌘⇧I to finish")
                     .font(.system(size: 10))
                     .foregroundColor(Color(nsColor: .tertiaryLabelColor))
             }
