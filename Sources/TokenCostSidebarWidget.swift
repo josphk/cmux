@@ -5,6 +5,7 @@ import SwiftUI
 struct TokenCostSidebarWidget: View {
     @EnvironmentObject var tabManager: TabManager
     @State private var isExpanded = false
+    @State private var hoverSuppressed = false
 
     /// Flat list of all agent entries across all workspaces.
     private var agentEntries: [(workspace: Workspace, surfaceId: String, usage: TokenUsageState)] {
@@ -89,8 +90,12 @@ struct TokenCostSidebarWidget: View {
             .padding(.vertical, 6)
             .contentShape(Rectangle())
             .onTapGesture {
+                hoverSuppressed = true
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isExpanded.toggle()
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    hoverSuppressed = false
                 }
             }
 
@@ -100,6 +105,7 @@ struct TokenCostSidebarWidget: View {
                     TokenCostAgentRow(
                         workspaceTitle: entry.workspace.title,
                         usage: entry.usage,
+                        hoverSuppressed: hoverSuppressed,
                         onTap: {
                             focusAgent(workspace: entry.workspace, surfaceId: entry.surfaceId)
                         }
@@ -132,6 +138,7 @@ struct TokenCostSidebarWidget: View {
 private struct TokenCostAgentRow: View {
     let workspaceTitle: String
     let usage: TokenUsageState
+    var hoverSuppressed: Bool = false
     var onTap: () -> Void = {}
 
     @State private var isHovered = false
@@ -158,12 +165,12 @@ private struct TokenCostAgentRow: View {
                 .contentTransition(.numericText())
                 .animation(.default, value: usage.cost)
         }
-        .foregroundStyle(isHovered ? .primary : .secondary)
+        .foregroundStyle(isHovered && !hoverSuppressed ? .primary : .secondary)
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color(nsColor: .white).opacity(isHovered ? 0.06 : 0))
+                .fill(Color(nsColor: .white).opacity(isHovered && !hoverSuppressed ? 0.06 : 0))
         )
         .padding(.horizontal, 4)
         .contentShape(Rectangle())
