@@ -579,20 +579,26 @@ struct BrowserPanelView: View {
         }
     }
 
+    private var hasConnectedAgent: Bool {
+        panel.resolveTargetTerminal() != nil
+    }
+
     private var inspectionPickerButton: some View {
-        Button(action: {
+        let connected = panel.isInspectionModeActive || hasConnectedAgent
+        return Button(action: {
             toggleInspectionMode()
         }) {
             Image(systemName: "scope")
                 .symbolRenderingMode(.monochrome)
                 .cmuxFlatSymbolColorRendering()
                 .font(.system(size: devToolsButtonIconSize, weight: panel.isInspectionModeActive ? .bold : .medium))
-                .foregroundStyle(panel.isInspectionModeActive ? Color.accentColor : devToolsColorOption.color)
+                .foregroundStyle(panel.isInspectionModeActive ? Color.accentColor : connected ? devToolsColorOption.color : devToolsColorOption.color.opacity(0.3))
                 .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
         }
         .buttonStyle(OmnibarAddressButtonStyle())
+        .disabled(!connected)
         .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
-        .help("Pick element for agent chat (⌘⇧I)")
+        .help(connected ? "Pick element for agent chat (⌘⇧I)" : "No connected agents")
         .accessibilityIdentifier("BrowserInspectionPickerButton")
     }
 
