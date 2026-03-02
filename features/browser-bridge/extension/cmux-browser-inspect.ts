@@ -96,7 +96,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 					const formatted = formatElement(el);
 					pi.sendUserMessage(`[browser pick] ${formatted}`, { deliverAs: "followUp" });
 				} catch {
-					pi.log(`[browser-bridge] malformed JSONL line: ${line}`);
+					console.log(`[browser-bridge] malformed JSONL line: ${line}`);
 				}
 			}
 		} catch {
@@ -120,7 +120,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 		try {
 			fs.writeFileSync(presenceFile, `${process.pid}\n`, "utf-8");
 		} catch {
-			pi.log("[browser-bridge] failed to write presence marker");
+			console.log("[browser-bridge] failed to write presence marker");
 		}
 
 		// Primary: fs.watch on directory, filter for our file
@@ -131,16 +131,16 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 				}
 			});
 			dirWatcher.on("error", () => {
-				pi.log("[browser-bridge] fs.watch error, relying on polling fallback");
+				console.log("[browser-bridge] fs.watch error, relying on polling fallback");
 			});
 		} catch {
-			pi.log("[browser-bridge] fs.watch unavailable, relying on polling fallback");
+			console.log("[browser-bridge] fs.watch unavailable, relying on polling fallback");
 		}
 
 		// Fallback: 2-second polling (catches anything fs.watch misses)
 		pollInterval = setInterval(processBridgeFile, POLL_INTERVAL_MS);
 
-		pi.log(`[browser-bridge] watching ${bridgeFile}`);
+		console.log(`[browser-bridge] watching ${bridgeFile}`);
 	}
 
 	function stopWatching(): void {
@@ -157,7 +157,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 		// Remove presence marker.
 		try { fs.unlinkSync(presenceFile); } catch {}
 
-		pi.log("[browser-bridge] watcher stopped");
+		console.log("[browser-bridge] watcher stopped");
 	}
 
 	// ── Events ────────────────────────────────────────────────────────────
@@ -285,7 +285,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 				// Non-blocking: fire and forget
 				pi.exec("cmux", ["browser", "inspect"]).catch((err: unknown) => {
 					const msg = err instanceof Error ? err.message : String(err);
-					pi.log(`[browser-bridge] /inspect background error: ${msg}`);
+					console.log(`[browser-bridge] /inspect background error: ${msg}`);
 				});
 				ctx.ui.notify("Inspection mode on — click elements in browser, ESC to finish", "info");
 			} catch (err: unknown) {
