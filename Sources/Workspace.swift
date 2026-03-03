@@ -3530,7 +3530,7 @@ extension Workspace: BonsplitDelegate {
         }
         if let terminalPanel = panel as? TerminalPanel {
             lastFocusedTerminalPanelId = terminalPanel.id
-            BrowserBridgeWatcher.shared.setActiveTarget(terminalPanel.id)
+            BrowserBridgeWatcher.shared.setActiveTarget(terminalPanel.id, workspaceId: id)
             rememberTerminalConfigInheritanceSource(terminalPanel)
         }
         let isManuallyUnread = manualUnreadPanelIds.contains(panelId)

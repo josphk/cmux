@@ -181,12 +181,16 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 
 	const inspectingFile = path.join(BRIDGE_DIR, "inspecting");
 
+	const workspaceId = process.env.CMUX_WORKSPACE_ID!;
+
 	function checkActiveTarget(): void {
 		if (!uiRef) return;
 		try {
 			const isInspecting = fs.existsSync(inspectingFile);
-			const target = fs.readFileSync(activeTargetFile, "utf-8").trim();
-			if (isInspecting && target === surfaceId) {
+			const content = fs.readFileSync(activeTargetFile, "utf-8").trim();
+			// Format: workspaceId:surfaceId
+			const [targetWorkspace, targetSurface] = content.split(":");
+			if (isInspecting && targetSurface === surfaceId && targetWorkspace === workspaceId) {
 				uiRef.setStatus("browser-bridge", "● Ready for browser picks");
 			} else {
 				uiRef.setStatus("browser-bridge", undefined);
