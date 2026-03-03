@@ -600,16 +600,9 @@ struct BrowserPanelView: View {
                 .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
         }
         .buttonStyle(OmnibarAddressButtonStyle())
-        .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
-        .overlay {
-            if !connected {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .help("No agent connected")
-            }
-        }
-        .help(connected ? "Toggle Pick Mode (⌘⇧I)" : "")
         .disabled(!connected)
+        .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
+        .help("Toggle Pick Mode (⌘⇧I)")
         .accessibilityIdentifier("BrowserInspectionPickerButton")
     }
 
