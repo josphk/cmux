@@ -1586,25 +1586,14 @@ final class BrowserPanel: Panel, ObservableObject {
     /// Uses nonisolated(unsafe) since the file read happens once and the result is immutable.
     nonisolated(unsafe) private static let inspectionModeScript: String = {
         // Try loading from the source tree first (development), then bundle (release).
-        // Resolve repo root from the executable path (e.g., DerivedData/…/Build/Products/Debug/cmux.app)
-        // by walking up until we find the project marker.
-        let repoRoot: URL? = {
-            var url = URL(fileURLWithPath: Bundle.main.executablePath ?? "")
-            for _ in 0..<15 {
-                url = url.deletingLastPathComponent()
-                if FileManager.default.fileExists(atPath: url.appendingPathComponent("GhosttyTabs.xcodeproj").path) {
-                    return url
-                }
-            }
-            return nil
-        }()
-        var candidates = [
-            // When launched from the repo root (reload.sh, Xcode)
-            URL(fileURLWithPath: "features/browser-bridge/inspection-mode.js"),
+        // Resolve relative to this Swift source file's location at compile time.
+        let thisFile = URL(fileURLWithPath: #filePath)
+        let repoRoot = thisFile
+            .deletingLastPathComponent() // Panels/
+            .deletingLastPathComponent() // Sources/
+        let candidates = [
+            repoRoot.appendingPathComponent("features/browser-bridge/inspection-mode.js"),
         ]
-        if let repoRoot {
-            candidates.insert(repoRoot.appendingPathComponent("features/browser-bridge/inspection-mode.js"), at: 0)
-        }
         for candidate in candidates {
             if let script = try? String(contentsOf: candidate, encoding: .utf8), !script.isEmpty {
                 return script
