@@ -1589,8 +1589,6 @@ final class BrowserPanel: Panel, ObservableObject {
         let candidates = [
             // When launched from the repo root (reload.sh, Xcode)
             URL(fileURLWithPath: "features/browser-bridge/inspection-mode.js"),
-            // Absolute fallback for the repo checkout
-            URL(fileURLWithPath: NSString("~/Code/cmux/features/browser-bridge/inspection-mode.js").expandingTildeInPath),
         ]
         for candidate in candidates {
             if let script = try? String(contentsOf: candidate, encoding: .utf8), !script.isEmpty {
@@ -1610,6 +1608,9 @@ final class BrowserPanel: Panel, ObservableObject {
     /// the pi extension which also writes to /tmp/cmux-browser-bridge/.
     private static let bridgeBaseDir = URL(fileURLWithPath: "/tmp/cmux-browser-bridge", isDirectory: true)
 
+    /// Shared formatter for pick timestamps.
+    private static let isoFormatter = ISO8601DateFormatter()
+
     /// Resolve the current target terminal — the last focused terminal with an active agent.
     /// Returns nil if no terminal has an agent listening.
     func resolveTargetTerminal() -> UUID? {
@@ -1618,8 +1619,9 @@ final class BrowserPanel: Panel, ObservableObject {
               let workspace = manager.tabs.first(where: { $0.id == workspaceId }) else {
             return nil
         }
+        let connected = BrowserBridgeWatcher.shared.connectedSurfaceIds
         func hasAgent(_ id: UUID) -> Bool {
-            FileManager.default.fileExists(atPath: Self.bridgeBaseDir.appendingPathComponent("\(id.uuidString).listening").path)
+            connected.contains(id.uuidString)
         }
         if let last = workspace.lastFocusedTerminalPanelId, hasAgent(last) {
             return last
@@ -1682,8 +1684,9 @@ final class BrowserPanel: Panel, ObservableObject {
         isInspectionModeActive = false
         webView.evaluateJavaScript("window.__cmuxInspectCleanup && window.__cmuxInspectCleanup()") { _, _ in }
 
-        // Remove inspection-active marker.
+        // Remove inspection markers.
         try? FileManager.default.removeItem(at: Self.bridgeBaseDir.appendingPathComponent("inspecting"))
+        try? FileManager.default.removeItem(at: Self.bridgeBaseDir.appendingPathComponent("active-target"))
 
         #if DEBUG
         dlog("browser.inspect.disabled picked=\(inspectionPickCount)")
@@ -1713,7 +1716,7 @@ final class BrowserPanel: Panel, ObservableObject {
         try? FileManager.default.createDirectory(at: Self.bridgeBaseDir, withIntermediateDirectories: true)
 
         var payload = data
-        payload["timestamp"] = ISO8601DateFormatter().string(from: Date())
+        payload["timestamp"] = Self.isoFormatter.string(from: Date())
         payload["surface_id"] = inspectionSurfaceId
         payload["pick_index"] = inspectionPickCount
         payload["event_id"] = UUID().uuidString
@@ -1723,9 +1726,10 @@ final class BrowserPanel: Panel, ObservableObject {
            var line = String(data: jsonData, encoding: .utf8) {
             line += "\n"
 
-            if let handle = try? FileHandle(forWritingTo: fileURL) {
+            if let handle = try? FileHandle(forWritingTo: fileURL),
+               let lineData = line.data(using: .utf8) {
                 handle.seekToEndOfFile()
-                handle.write(line.data(using: .utf8)!)
+                handle.write(lineData)
                 handle.closeFile()
             } else {
                 try? line.write(to: fileURL, atomically: true, encoding: .utf8)

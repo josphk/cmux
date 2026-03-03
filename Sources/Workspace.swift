@@ -3530,7 +3530,10 @@ extension Workspace: BonsplitDelegate {
         }
         if let terminalPanel = panel as? TerminalPanel {
             lastFocusedTerminalPanelId = terminalPanel.id
-            BrowserBridgeWatcher.shared.setActiveTarget(terminalPanel.id, workspaceId: id)
+            // Only write active-target when inspection mode is active somewhere in this workspace.
+            if panels.values.contains(where: { ($0 as? BrowserPanel)?.isInspectionModeActive == true }) {
+                BrowserBridgeWatcher.shared.setActiveTarget(terminalPanel.id, workspaceId: id)
+            }
             rememberTerminalConfigInheritanceSource(terminalPanel)
         }
         let isManuallyUnread = manualUnreadPanelIds.contains(panelId)
