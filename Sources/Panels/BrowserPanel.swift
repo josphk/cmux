@@ -1655,9 +1655,13 @@ final class BrowserPanel: Panel, ObservableObject {
         inspectionPickCount = 0
 
         // Write inspection-active marker so extensions show their indicator.
-        let inspectingFile = Self.bridgeBaseDir.appendingPathComponent("inspecting")
         try? FileManager.default.createDirectory(at: Self.bridgeBaseDir, withIntermediateDirectories: true)
-        try? "1".write(to: inspectingFile, atomically: true, encoding: .utf8)
+        try? "1".write(to: Self.bridgeBaseDir.appendingPathComponent("inspecting"), atomically: true, encoding: .utf8)
+
+        // Immediately signal the target so the indicator shows on the right agent.
+        if let targetId = resolveTargetTerminal() {
+            BrowserBridgeWatcher.shared.setActiveTarget(targetId, workspaceId: workspaceId)
+        }
 
         webView.evaluateJavaScript(Self.inspectionModeScript) { [weak self] _, error in
             guard let self else { return }
