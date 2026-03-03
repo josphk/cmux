@@ -3,21 +3,21 @@
   if (window.__cmuxInspectActive) return;
   window.__cmuxInspectActive = true;
 
-  var OVERLAY_COLOR_BG = 'rgba(59, 130, 246, 0.15)';
-  var OVERLAY_COLOR_BORDER = 'rgba(59, 130, 246, 0.6)';
-  var FLASH_COLOR_BORDER = 'rgba(34, 197, 94, 0.3)';
-  var TOOLTIP_BG = 'rgba(0,0,0,0.85)';
-  var Z = 2147483647;
-  var ATTR = 'data-cmux-inspect';
+  const OVERLAY_COLOR_BG = 'rgba(59, 130, 246, 0.15)';
+  const OVERLAY_COLOR_BORDER = 'rgba(59, 130, 246, 0.6)';
+  const FLASH_COLOR_BORDER = 'rgba(34, 197, 94, 0.3)';
+  const TOOLTIP_BG = 'rgba(0,0,0,0.85)';
+  const Z = 2147483647;
+  const ATTR = 'data-cmux-inspect';
 
   // --- Inject crosshair cursor style ---
-  var cursorStyle = document.createElement('style');
+  const cursorStyle = document.createElement('style');
   cursorStyle.setAttribute(ATTR, 'cursor');
   cursorStyle.textContent = '* { cursor: crosshair !important; }';
   document.head.appendChild(cursorStyle);
 
   // --- Create overlay ---
-  var overlay = document.createElement('div');
+  const overlay = document.createElement('div');
   overlay.setAttribute(ATTR, 'overlay');
   overlay.style.cssText = [
     'position:fixed',
@@ -33,7 +33,7 @@
   document.body.appendChild(overlay);
 
   // --- Create tooltip ---
-  var tooltip = document.createElement('div');
+  const tooltip = document.createElement('div');
   tooltip.setAttribute(ATTR, 'tooltip');
   tooltip.style.cssText = [
     'position:fixed',
@@ -53,17 +53,17 @@
   ].join(';');
   document.body.appendChild(tooltip);
 
-  var lastTarget = null;
+  let lastTarget = null;
 
   // --- Role detection ---
   function detectRole(el) {
-    var explicit = el.getAttribute('role');
+    const explicit = el.getAttribute('role');
     if (explicit) return explicit;
 
-    var tag = el.tagName.toLowerCase();
-    var type = (el.getAttribute('type') || '').toLowerCase();
+    const tag = el.tagName.toLowerCase();
+    const type = (el.getAttribute('type') || '').toLowerCase();
 
-    var implicitRoles = {
+    const implicitRoles = {
       'button': 'button',
       'a': 'link',
       'select': 'combobox',
@@ -80,7 +80,7 @@
     if (implicitRoles[tag]) return implicitRoles[tag];
 
     if (tag === 'input') {
-      var inputRoles = {
+      const inputRoles = {
         'text': 'textbox',
         'search': 'textbox',
         'email': 'textbox',
@@ -99,21 +99,21 @@
 
   // --- Label extraction ---
   function extractLabel(el) {
-    var ariaLabel = el.getAttribute('aria-label');
+    const ariaLabel = el.getAttribute('aria-label');
     if (ariaLabel) return ariaLabel;
 
-    var labelledBy = el.getAttribute('aria-labelledby');
+    const labelledBy = el.getAttribute('aria-labelledby');
     if (labelledBy) {
-      var ids = labelledBy.split(/\s+/);
-      var parts = [];
-      for (var i = 0; i < ids.length; i++) {
-        var ref = document.getElementById(ids[i]);
+      const ids = labelledBy.split(/\s+/);
+      const parts = [];
+      for (let i = 0; i < ids.length; i++) {
+        const ref = document.getElementById(ids[i]);
         if (ref) parts.push(ref.textContent.trim());
       }
       if (parts.length) return parts.join(' ');
     }
 
-    var text = (el.textContent || '').trim();
+    const text = (el.textContent || '').trim();
     if (text.length > 80) return text.substring(0, 80) + '\u2026';
     return text;
   }
@@ -121,7 +121,7 @@
   // --- Selector generation ---
   function isUnique(selector) {
     try {
-      var matches = document.querySelectorAll(selector);
+      const matches = document.querySelectorAll(selector);
       return matches.length === 1;
     } catch (e) {
       return false;
@@ -134,45 +134,45 @@
 
   function buildSelector(el) {
     // Prefer data-testid
-    var testId = el.getAttribute('data-testid');
+    const testId = el.getAttribute('data-testid');
     if (testId) {
-      var sel = '[data-testid="' + escapeCSSValue(testId) + '"]';
+      const sel = '[data-testid="' + escapeCSSValue(testId) + '"]';
       if (isUnique(sel)) return sel;
     }
 
     // Then #id
     if (el.id) {
-      var idSel = '#' + CSS.escape(el.id);
+      const idSel = '#' + CSS.escape(el.id);
       if (isUnique(idSel)) return idSel;
     }
 
     // Try tag.class combos
-    var tag = el.tagName.toLowerCase();
+    const tag = el.tagName.toLowerCase();
     if (el.classList && el.classList.length) {
-      for (var i = 0; i < el.classList.length; i++) {
-        var cls = tag + '.' + CSS.escape(el.classList[i]);
+      for (let i = 0; i < el.classList.length; i++) {
+        const cls = tag + '.' + CSS.escape(el.classList[i]);
         if (isUnique(cls)) return cls;
       }
       // Try all classes combined
-      var allClasses = tag + '.' + Array.prototype.map.call(el.classList, function(c) {
+      const allClasses = tag + '.' + Array.prototype.map.call(el.classList, function(c) {
         return CSS.escape(c);
       }).join('.');
       if (isUnique(allClasses)) return allClasses;
     }
 
     // Try tag[attr] combos for common attributes
-    var tryAttrs = ['name', 'type', 'href', 'src', 'placeholder'];
-    for (var a = 0; a < tryAttrs.length; a++) {
-      var attrVal = el.getAttribute(tryAttrs[a]);
+    const tryAttrs = ['name', 'type', 'href', 'src', 'placeholder'];
+    for (let a = 0; a < tryAttrs.length; a++) {
+      const attrVal = el.getAttribute(tryAttrs[a]);
       if (attrVal) {
-        var attrSel = tag + '[' + tryAttrs[a] + '="' + escapeCSSValue(attrVal) + '"]';
+        const attrSel = tag + '[' + tryAttrs[a] + '="' + escapeCSSValue(attrVal) + '"]';
         if (isUnique(attrSel)) return attrSel;
       }
     }
 
     // Walk up ancestors (max 3 levels) for uniqueness
     function selfPart(elem) {
-      var t = elem.tagName.toLowerCase();
+      const t = elem.tagName.toLowerCase();
       if (elem.id) return '#' + CSS.escape(elem.id);
       if (elem.classList && elem.classList.length) {
         return t + '.' + Array.prototype.map.call(elem.classList, function(c) {
@@ -182,12 +182,12 @@
       return t;
     }
 
-    var parts = [selfPart(el)];
-    var current = el.parentElement;
-    var depth = 0;
+    const parts = [selfPart(el)];
+    let current = el.parentElement;
+    let depth = 0;
     while (current && current !== document.body && current !== document.documentElement && depth < 3) {
       parts.unshift(selfPart(current));
-      var candidate = parts.join(' > ');
+      const candidate = parts.join(' > ');
       if (isUnique(candidate)) return candidate;
       current = current.parentElement;
       depth++;
@@ -199,11 +199,11 @@
 
   // --- Collect attributes ---
   function collectAttributes(el) {
-    var attrs = {};
-    var pick = ['type', 'class', 'id', 'name', 'href', 'src', 'alt', 'placeholder', 'data-testid', 'value', 'aria-label'];
-    for (var i = 0; i < pick.length; i++) {
-      var key = pick[i];
-      var val;
+    const attrs = {};
+    const pick = ['type', 'class', 'id', 'name', 'href', 'src', 'alt', 'placeholder', 'data-testid', 'value', 'aria-label'];
+    for (let i = 0; i < pick.length; i++) {
+      const key = pick[i];
+      let val;
       if (key === 'value' && ('value' in el)) {
         val = el.value;
       } else {
@@ -218,12 +218,12 @@
 
   // --- Mousemove handler ---
   function onMouseMove(e) {
-    var target = e.target;
+    const target = e.target;
     // Skip our own injected elements
     if (target.hasAttribute && target.hasAttribute(ATTR)) return;
 
     lastTarget = target;
-    var rect = target.getBoundingClientRect();
+    const rect = target.getBoundingClientRect();
 
     overlay.style.top = rect.top + 'px';
     overlay.style.left = rect.left + 'px';
@@ -232,9 +232,9 @@
     overlay.style.display = 'block';
 
     // Build tooltip text
-    var role = detectRole(target);
-    var label = extractLabel(target);
-    var isIframe = target.tagName.toLowerCase() === 'iframe';
+    const role = detectRole(target);
+    const label = extractLabel(target);
+    const isIframe = target.tagName.toLowerCase() === 'iframe';
 
     if (isIframe) {
       tooltip.textContent = 'iframe \u2014 inner elements not supported';
@@ -243,8 +243,8 @@
     }
 
     // Position tooltip below element
-    var tooltipTop = rect.bottom + 6;
-    var tooltipLeft = rect.left;
+    let tooltipTop = rect.bottom + 6;
+    let tooltipLeft = rect.left;
     // Keep tooltip within viewport
     if (tooltipTop + 24 > window.innerHeight) {
       tooltipTop = rect.top - 28;
@@ -261,10 +261,10 @@
     e.preventDefault();
     e.stopImmediatePropagation();
 
-    var target = e.target;
+    const target = e.target;
     if (target.hasAttribute && target.hasAttribute(ATTR)) return;
 
-    var data = {
+    const data = {
       selector: buildSelector(target),
       text: extractLabel(target),
       role: detectRole(target),
@@ -282,8 +282,8 @@
     }
 
     // Flash green on picked element
-    var prevOutline = target.style.outline;
-    var prevOutlineOffset = target.style.outlineOffset;
+    const prevOutline = target.style.outline;
+    const prevOutlineOffset = target.style.outlineOffset;
     target.style.outline = '2px solid ' + FLASH_COLOR_BORDER;
     target.style.outlineOffset = '-1px';
     setTimeout(function() {
@@ -309,8 +309,8 @@
     document.documentElement.removeEventListener('mouseleave', onMouseLeave, false);
 
     // Remove all injected DOM elements
-    var injected = document.querySelectorAll('[' + ATTR + ']');
-    for (var i = 0; i < injected.length; i++) {
+    const injected = document.querySelectorAll('[' + ATTR + ']');
+    for (let i = 0; i < injected.length; i++) {
       injected[i].parentNode.removeChild(injected[i]);
     }
 
