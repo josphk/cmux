@@ -4,7 +4,7 @@
  * Bridges browser element picks from cmux inspection mode into the pi agent conversation.
  *
  * Flow A (user-initiated): Watches /tmp/cmux-browser-bridge/*.jsonl for new picks and injects them
- *         as user messages.
+ *         as numbered references (<1>, <2>, ...) that the user can reference in their prompt.
  * Flow B (agent-initiated): Provides a `browser_inspect` tool the LLM can call to request
  *         the user pick elements.
  * Command: `/inspect` toggles inspection mode in the cmux browser panel.
@@ -34,13 +34,13 @@ const ELEMENT_ATTRS = [
 ] as const;
 
 /**
- * Format a picked element record as an XML-like tag.
+ * Format a picked element record as an XML-like tag with a pick ID.
  *
  * Example output:
- *   <browser-element selector="form > button.primary-submit" role="button" text="Submit" page="http://localhost:3000" />
+ *   <browser-element pick="<1>" selector="form > button.primary-submit" role="button" text="Submit" page="http://localhost:3000" />
  */
-function formatElement(el: Record<string, unknown>): string {
-	const attrs: string[] = [];
+function formatElement(el: Record<string, unknown>, pickId: number): string {
+	const attrs: string[] = [`pick="<${pickId}>"`];
 
 	for (const key of ELEMENT_ATTRS) {
 		const val = el[key];
@@ -77,10 +77,14 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	let dirWatcher: fs.FSWatcher | null = null;
 	let pollInterval: ReturnType<typeof setInterval> | null = null;
 
+	// ── Pick counter (resets per agent turn) ──────────────────────────────
+	let pickCounter = 0;
+
 	// ── Bridge file processing ────────────────────────────────────────────
 
 	/** Read new lines from this agent's bridge file and deliver them to the chat. */
 	function processBridgeFile(): void {
+		if (!uiRef) return;
 		try {
 			if (!fs.existsSync(bridgeFile)) return;
 			const content = fs.readFileSync(bridgeFile, "utf-8");
@@ -94,14 +98,21 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 			for (const line of newLines) {
 				try {
 					const el = JSON.parse(line) as Record<string, unknown>;
-					const formatted = formatElement(el);
-					// Add as a message in the chat without triggering a turn.
-					// The user can then reference it in their next prompt.
+					pickCounter++;
+					const pickId = pickCounter;
+					const formatted = formatElement(el, pickId);
+
+					// Add as a custom message with the pick ID in the title.
 					pi.sendMessage({
 						customType: "browser-pick",
-						content: formatted,
+						content: `[browser-pick: <${pickId}>]\n${formatted}`,
 						display: "user",
 					}, { triggerTurn: false });
+
+					// Auto-append the pick reference to the editor.
+					const currentText = uiRef.getEditorText();
+					const separator = currentText.length > 0 ? " " : "";
+					uiRef.setEditorText(`${currentText}${separator}<${pickId}>`);
 				} catch {
 					console.log(`[browser-bridge] malformed JSONL line: ${line}`);
 				}
@@ -177,6 +188,8 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	let targetWatcher: fs.FSWatcher | null = null;
 	let uiRef: {
 		setStatus: (key: string, text: string | undefined) => void;
+		getEditorText: () => string;
+		setEditorText: (text: string) => void;
 	} | null = null;
 
 	const inspectingFile = path.join(BRIDGE_DIR, "inspecting");
@@ -231,6 +244,11 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 		}
 	});
 
+	// Reset pick counter when a new agent turn starts (user submitted their message).
+	pi.on("before_agent_start", async () => {
+		pickCounter = 0;
+	});
+
 	pi.on("session_shutdown", async () => {
 		stopWatching();
 		if (targetWatcher) { targetWatcher.close(); targetWatcher = null; }
@@ -282,7 +300,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 						};
 					}
 
-					const formatted = elements.map(formatElement).join("\n");
+					const formatted = elements.map((el, i) => formatElement(el, i + 1)).join("\n");
 					return {
 						content: [{ type: "text" as const, text: `Picked elements:\n${formatted}` }],
 						details: { count: elements.length },

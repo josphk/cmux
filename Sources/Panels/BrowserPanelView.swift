@@ -568,10 +568,6 @@ struct BrowserPanelView: View {
                 Text("Click elements to reference in chat")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
-                Spacer()
-                Text("⌘⇧I to finish")
-                    .font(.system(size: 10))
-                    .foregroundColor(Color(nsColor: .tertiaryLabelColor))
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
