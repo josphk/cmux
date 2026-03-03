@@ -1589,8 +1589,9 @@ final class BrowserPanel: Panel, ObservableObject {
         // Resolve relative to this Swift source file's location at compile time.
         let thisFile = URL(fileURLWithPath: #filePath)
         let repoRoot = thisFile
-            .deletingLastPathComponent() // Panels/
-            .deletingLastPathComponent() // Sources/
+            .deletingLastPathComponent() // BrowserPanel.swift → Panels/
+            .deletingLastPathComponent() // Panels/ → Sources/
+            .deletingLastPathComponent() // Sources/ → repo root
         let candidates = [
             repoRoot.appendingPathComponent("features/browser-bridge/inspection-mode.js"),
         ]
