@@ -78,6 +78,15 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
+  // Report after each assistant message ends (mid-turn), so cost updates
+  // incrementally during multi-step tool-use turns — not just at agent_end.
+  pi.on("message_end", async (event, ctx) => {
+    if (event.message?.role === "assistant") {
+      reportTokens(ctx);
+    }
+  });
+
+  // Also report at agent_end as a final catch-all.
   pi.on("agent_end", async (_event, ctx) => {
     reportTokens(ctx);
   });
