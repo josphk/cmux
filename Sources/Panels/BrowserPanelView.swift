@@ -574,7 +574,7 @@ struct BrowserPanelView: View {
                     .foregroundColor(Color(nsColor: .tertiaryLabelColor))
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 4)
+            .padding(.vertical, 8)
             .background(Color.accentColor.opacity(0.08))
         }
     }
