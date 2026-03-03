@@ -112,7 +112,6 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 					const lines: string[] = [];
 
 					for (const [id, pick] of pendingPicks) {
-						if (lines.length > 0) lines.push(""); // spacing between picks
 						const idStr = `${BOLD}${BLUE}<${id}>${RESET}${BLUE_BG}`;
 						const sep = "  ";
 						const idVisLen = visibleLen(idStr);
@@ -126,6 +125,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 						const rightPad = Math.max(0, width - contentVisLen - 2);
 						lines.push(`${BLUE_BG} ${content}${BLUE_BG}${" ".repeat(rightPad)} ${RESET}`);
 					}
+					lines.push(""); // spacing below picks
 					cachedLines = lines;
 					return lines;
 				},
@@ -264,7 +264,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 					render(width: number): string[] {
 						const dot = `${BLUE}●${RESET}`;
 						const text = `${BLUE_DIM} Ready for browser picks${RESET}`;
-						return [dot + text];
+						return [dot + text, ""];
 					},
 				}), { placement: "belowEditor" });
 			} else {
