@@ -1313,10 +1313,11 @@ private enum DebugWindowConfigSnapshot {
         shortcutHintPaneTabXOffset=\(String(format: "%.1f", doubleValue(defaults, key: ShortcutHintDebugSettings.paneHintXKey, fallback: ShortcutHintDebugSettings.defaultPaneHintX)))
         shortcutHintPaneTabYOffset=\(String(format: "%.1f", doubleValue(defaults, key: ShortcutHintDebugSettings.paneHintYKey, fallback: ShortcutHintDebugSettings.defaultPaneHintY)))
         shortcutHintAlwaysShow=\(boolValue(defaults, key: ShortcutHintDebugSettings.alwaysShowHintsKey, fallback: ShortcutHintDebugSettings.defaultAlwaysShowHints))
+        shortcutHintShowOnCommandHold=\(boolValue(defaults, key: ShortcutHintDebugSettings.showHintsOnCommandHoldKey, fallback: ShortcutHintDebugSettings.defaultShowHintsOnCommandHold))
         """
 
         let backgroundPayload = """
-        bgGlassEnabled=\(boolValue(defaults, key: "bgGlassEnabled", fallback: true))
+        bgGlassEnabled=\(boolValue(defaults, key: "bgGlassEnabled", fallback: false))
         bgGlassMaterial=\(stringValue(defaults, key: "bgGlassMaterial", fallback: "hudWindow"))
         bgGlassTintHex=\(stringValue(defaults, key: "bgGlassTintHex", fallback: "#000000"))
         bgGlassTintOpacity=\(String(format: "%.2f", doubleValue(defaults, key: "bgGlassTintOpacity", fallback: 0.03)))
@@ -2373,7 +2374,7 @@ private struct BackgroundDebugView: View {
     @AppStorage("bgGlassTintHex") private var bgGlassTintHex = "#000000"
     @AppStorage("bgGlassTintOpacity") private var bgGlassTintOpacity = 0.03
     @AppStorage("bgGlassMaterial") private var bgGlassMaterial = "hudWindow"
-    @AppStorage("bgGlassEnabled") private var bgGlassEnabled = true
+    @AppStorage("bgGlassEnabled") private var bgGlassEnabled = false
 
     var body: some View {
         ScrollView {
@@ -2419,7 +2420,7 @@ private struct BackgroundDebugView: View {
                         bgGlassTintHex = "#000000"
                         bgGlassTintOpacity = 0.03
                         bgGlassMaterial = "hudWindow"
-                        bgGlassEnabled = true
+                        bgGlassEnabled = false
                         updateWindowGlassTint()
                     }
 
@@ -2601,6 +2602,60 @@ enum AppearanceSettings {
     }
 }
 
+enum AppIconMode: String, CaseIterable, Identifiable {
+    case automatic
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
+    var imageName: String? {
+        switch self {
+        case .automatic: return nil
+        case .light: return "AppIconLight"
+        case .dark: return "AppIconDark"
+        }
+    }
+}
+
+enum AppIconSettings {
+    static let modeKey = "appIconMode"
+    static let defaultMode: AppIconMode = .automatic
+
+    static func resolvedMode(defaults: UserDefaults = .standard) -> AppIconMode {
+        guard let raw = defaults.string(forKey: modeKey),
+              let mode = AppIconMode(rawValue: raw) else {
+            return defaultMode
+        }
+        return mode
+    }
+
+    static func applyIcon(_ mode: AppIconMode) {
+        switch mode {
+        case .automatic:
+            // Let the asset catalog handle appearance-based icon selection (macOS 15+).
+            // Reset to the default bundle icon.
+            NSApplication.shared.applicationIconImage = nil
+        case .light:
+            if let icon = NSImage(named: "AppIconLight") {
+                NSApplication.shared.applicationIconImage = icon
+            }
+        case .dark:
+            if let icon = NSImage(named: "AppIconDark") {
+                NSApplication.shared.applicationIconImage = icon
+            }
+        }
+    }
+}
+
 enum QuitWarningSettings {
     static let warnBeforeQuitKey = "warnBeforeQuitShortcut"
     static let defaultWarnBeforeQuit = true
@@ -2661,6 +2716,7 @@ struct SettingsView: View {
     private let pickerColumnWidth: CGFloat = 196
 
     @AppStorage(AppearanceSettings.appearanceModeKey) private var appearanceMode = AppearanceSettings.defaultMode.rawValue
+    @AppStorage(AppIconSettings.modeKey) private var appIconMode = AppIconSettings.defaultMode.rawValue
     @AppStorage(SocketControlSettings.appStorageKey) private var socketControlMode = SocketControlSettings.defaultMode.rawValue
     @AppStorage(ClaudeCodeIntegrationSettings.hooksEnabledKey)
     private var claudeCodeHooksEnabled = ClaudeCodeIntegrationSettings.defaultHooksEnabled
@@ -2675,6 +2731,8 @@ struct SettingsView: View {
     @AppStorage(BrowserLinkOpenSettings.interceptTerminalOpenCommandInCmuxBrowserKey)
     private var interceptTerminalOpenCommandInCmuxBrowser = BrowserLinkOpenSettings.initialInterceptTerminalOpenCommandInCmuxBrowserValue()
     @AppStorage(BrowserLinkOpenSettings.browserHostWhitelistKey) private var browserHostWhitelist = BrowserLinkOpenSettings.defaultBrowserHostWhitelist
+    @AppStorage(BrowserLinkOpenSettings.browserExternalOpenPatternsKey)
+    private var browserExternalOpenPatterns = BrowserLinkOpenSettings.defaultBrowserExternalOpenPatterns
     @AppStorage(BrowserInsecureHTTPSettings.allowlistKey) private var browserInsecureHTTPAllowlist = BrowserInsecureHTTPSettings.defaultAllowlistText
     @AppStorage(NotificationBadgeSettings.dockBadgeEnabledKey) private var notificationDockBadgeEnabled = NotificationBadgeSettings.defaultDockBadgeEnabled
     @AppStorage(QuitWarningSettings.warnBeforeQuitKey) private var warnBeforeQuitShortcut = QuitWarningSettings.defaultWarnBeforeQuit
@@ -2689,6 +2747,8 @@ struct SettingsView: View {
     @AppStorage("sidebarShowPullRequest") private var sidebarShowPullRequest = true
     @AppStorage(BrowserLinkOpenSettings.openSidebarPullRequestLinksInCmuxBrowserKey)
     private var openSidebarPullRequestLinksInCmuxBrowser = BrowserLinkOpenSettings.defaultOpenSidebarPullRequestLinksInCmuxBrowser
+    @AppStorage(ShortcutHintDebugSettings.showHintsOnCommandHoldKey)
+    private var showShortcutHintsOnCommandHold = ShortcutHintDebugSettings.defaultShowHintsOnCommandHold
     @AppStorage("sidebarShowPorts") private var sidebarShowPorts = true
     @AppStorage("sidebarShowLog") private var sidebarShowLog = true
     @AppStorage("sidebarShowProgress") private var sidebarShowProgress = true
@@ -2831,6 +2891,16 @@ struct SettingsView: View {
                             .labelsHidden()
                             .pickerStyle(.menu)
                         }
+
+                        SettingsCardDivider()
+
+                        AppIconPickerRow(
+                            selectedMode: appIconMode,
+                            onSelect: { mode in
+                                appIconMode = mode.rawValue
+                                AppIconSettings.applyIcon(mode)
+                            }
+                        )
 
                         SettingsCardDivider()
 
@@ -3289,6 +3359,31 @@ struct SettingsView: View {
                                     .padding(.horizontal, 16)
                                     .padding(.bottom, 12)
                             }
+
+                            SettingsCardDivider()
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                SettingsCardRow(
+                                    "URLs to Always Open Externally",
+                                    subtitle: "Applies to terminal link clicks and intercepted `open https://...` calls. One rule per line. Plain text matches any URL substring, or prefix with `re:` for regex (for example: openai.com/usage, re:^https?://[^/]*\\.example\\.com/(billing|usage))."
+                                ) {
+                                    EmptyView()
+                                }
+
+                                TextEditor(text: $browserExternalOpenPatterns)
+                                    .font(.system(.body, design: .monospaced))
+                                    .frame(minHeight: 60, maxHeight: 120)
+                                    .scrollContentBackground(.hidden)
+                                    .padding(6)
+                                    .background(Color(nsColor: .controlBackgroundColor))
+                                    .cornerRadius(6)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                                    )
+                                    .padding(.horizontal, 16)
+                                    .padding(.bottom, 12)
+                            }
                         }
 
                         SettingsCardDivider()
@@ -3368,6 +3463,19 @@ struct SettingsView: View {
 
                     SettingsSectionHeader(title: "Keyboard Shortcuts")
                     SettingsCard {
+                        SettingsCardRow(
+                            "Show Cmd/Ctrl-Hold Shortcut Hints",
+                            subtitle: showShortcutHintsOnCommandHold
+                                ? "Holding Cmd (sidebar/titlebar) or Ctrl/Cmd (pane tabs) shows shortcut hint pills."
+                                : "Holding Cmd or Ctrl keeps shortcut hint pills hidden."
+                        ) {
+                            Toggle("", isOn: $showShortcutHintsOnCommandHold)
+                                .labelsHidden()
+                                .controlSize(.small)
+                        }
+
+                        SettingsCardDivider()
+
                         let actions = KeyboardShortcutSettings.Action.allCases
                         ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
                             ShortcutSettingRow(action: action)
@@ -3526,6 +3634,8 @@ struct SettingsView: View {
 
     private func resetAllSettings() {
         appearanceMode = AppearanceSettings.defaultMode.rawValue
+        appIconMode = AppIconSettings.defaultMode.rawValue
+        AppIconSettings.applyIcon(.automatic)
         socketControlMode = SocketControlSettings.defaultMode.rawValue
         claudeCodeHooksEnabled = ClaudeCodeIntegrationSettings.defaultHooksEnabled
         sendAnonymousTelemetry = TelemetrySettings.defaultSendAnonymousTelemetry
@@ -3535,6 +3645,7 @@ struct SettingsView: View {
         openTerminalLinksInCmuxBrowser = BrowserLinkOpenSettings.defaultOpenTerminalLinksInCmuxBrowser
         interceptTerminalOpenCommandInCmuxBrowser = BrowserLinkOpenSettings.defaultInterceptTerminalOpenCommandInCmuxBrowser
         browserHostWhitelist = BrowserLinkOpenSettings.defaultBrowserHostWhitelist
+        browserExternalOpenPatterns = BrowserLinkOpenSettings.defaultBrowserExternalOpenPatterns
         browserInsecureHTTPAllowlist = BrowserInsecureHTTPSettings.defaultAllowlistText
         browserInsecureHTTPAllowlistDraft = BrowserInsecureHTTPSettings.defaultAllowlistText
         notificationDockBadgeEnabled = NotificationBadgeSettings.defaultDockBadgeEnabled
@@ -3547,6 +3658,7 @@ struct SettingsView: View {
         sidebarShowBranchDirectory = true
         sidebarShowPullRequest = true
         openSidebarPullRequestLinksInCmuxBrowser = BrowserLinkOpenSettings.defaultOpenSidebarPullRequestLinksInCmuxBrowser
+        showShortcutHintsOnCommandHold = ShortcutHintDebugSettings.defaultShowHintsOnCommandHold
         sidebarShowPorts = true
         sidebarShowLog = true
         sidebarShowProgress = true
@@ -3737,6 +3849,79 @@ private struct SettingsCardNote: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct AppIconPickerRow: View {
+    let selectedMode: String
+    let onSelect: (AppIconMode) -> Void
+
+    private let iconSize: CGFloat = 48
+    private let autoIconSize: CGFloat = 36
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("App Icon")
+                .font(.system(size: 13, weight: .medium))
+
+            HStack(spacing: 12) {
+                ForEach(AppIconMode.allCases) { mode in
+                    let isSelected = selectedMode == mode.rawValue
+                    Button {
+                        onSelect(mode)
+                    } label: {
+                        VStack(spacing: 6) {
+                            Group {
+                                if mode == .automatic {
+                                    // Show both icons overlapping
+                                    ZStack {
+                                        Image("AppIconLight")
+                                            .resizable()
+                                            .interpolation(.high)
+                                            .frame(width: autoIconSize, height: autoIconSize)
+                                            .clipShape(RoundedRectangle(cornerRadius: autoIconSize * 0.22, style: .continuous))
+                                            .offset(x: -10)
+                                        Image("AppIconDark")
+                                            .resizable()
+                                            .interpolation(.high)
+                                            .frame(width: autoIconSize, height: autoIconSize)
+                                            .clipShape(RoundedRectangle(cornerRadius: autoIconSize * 0.22, style: .continuous))
+                                            .offset(x: 10)
+                                    }
+                                    .frame(width: iconSize, height: iconSize)
+                                } else {
+                                    Image(mode.imageName ?? "AppIconLight")
+                                        .resizable()
+                                        .interpolation(.high)
+                                        .frame(width: iconSize, height: iconSize)
+                                        .clipShape(RoundedRectangle(cornerRadius: iconSize * 0.22, style: .continuous))
+                                }
+                            }
+
+                            Text(mode.displayName)
+                                .font(.system(size: 11))
+                                .foregroundColor(isSelected ? .primary : .secondary)
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(isSelected
+                                    ? Color.accentColor.opacity(0.12)
+                                    : Color.clear)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -10,11 +10,21 @@ import Bonsplit
 import IOSurface
 
 #if os(macOS)
-private func cmuxShouldUseTransparentBackgroundWindow() -> Bool {
+func cmuxShouldUseTransparentBackgroundWindow() -> Bool {
     let defaults = UserDefaults.standard
     let sidebarBlendMode = defaults.string(forKey: "sidebarBlendMode") ?? "withinWindow"
-    let bgGlassEnabled = defaults.object(forKey: "bgGlassEnabled") as? Bool ?? true
+    let bgGlassEnabled = defaults.object(forKey: "bgGlassEnabled") as? Bool ?? false
     return sidebarBlendMode == "behindWindow" && bgGlassEnabled && !WindowGlassEffect.isAvailable
+}
+
+func cmuxShouldUseClearWindowBackground(for opacity: Double) -> Bool {
+    cmuxShouldUseTransparentBackgroundWindow() || opacity < 0.999
+}
+
+private func cmuxTransparentWindowBaseColor() -> NSColor {
+    // A tiny non-zero alpha matches Ghostty's window compositing behavior on macOS and
+    // avoids visual artifacts that can happen with a fully clear window background.
+    NSColor.white.withAlphaComponent(0.001)
 }
 #endif
 
@@ -199,9 +209,20 @@ final class GhosttyDefaultBackgroundNotificationDispatcher {
 
 func resolveTerminalOpenURLTarget(_ rawValue: String) -> TerminalOpenURLTarget? {
     let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return nil }
+    #if DEBUG
+    dlog("link.resolve input=\(trimmed)")
+    #endif
+    guard !trimmed.isEmpty else {
+        #if DEBUG
+        dlog("link.resolve result=nil (empty)")
+        #endif
+        return nil
+    }
 
     if NSString(string: trimmed).isAbsolutePath {
+        #if DEBUG
+        dlog("link.resolve result=external(absolutePath) url=\(trimmed)")
+        #endif
         return .external(URL(fileURLWithPath: trimmed))
     }
 
@@ -209,21 +230,44 @@ func resolveTerminalOpenURLTarget(_ rawValue: String) -> TerminalOpenURLTarget? 
        let scheme = parsed.scheme?.lowercased() {
         if scheme == "http" || scheme == "https" {
             guard BrowserInsecureHTTPSettings.normalizeHost(parsed.host ?? "") != nil else {
+                #if DEBUG
+                dlog("link.resolve result=external(invalidHost) url=\(parsed)")
+                #endif
                 return .external(parsed)
             }
+            #if DEBUG
+            dlog("link.resolve result=embeddedBrowser url=\(parsed)")
+            #endif
             return .embeddedBrowser(parsed)
         }
+        #if DEBUG
+        dlog("link.resolve result=external(scheme=\(scheme)) url=\(parsed)")
+        #endif
         return .external(parsed)
     }
 
     if let webURL = resolveBrowserNavigableURL(trimmed) {
         guard BrowserInsecureHTTPSettings.normalizeHost(webURL.host ?? "") != nil else {
+            #if DEBUG
+            dlog("link.resolve result=external(bareHost-invalidHost) url=\(webURL)")
+            #endif
             return .external(webURL)
         }
+        #if DEBUG
+        dlog("link.resolve result=embeddedBrowser(bareHost) url=\(webURL)")
+        #endif
         return .embeddedBrowser(webURL)
     }
 
-    guard let fallback = URL(string: trimmed) else { return nil }
+    guard let fallback = URL(string: trimmed) else {
+        #if DEBUG
+        dlog("link.resolve result=nil (unparseable)")
+        #endif
+        return nil
+    }
+    #if DEBUG
+    dlog("link.resolve result=external(fallback) url=\(fallback)")
+    #endif
     return .external(fallback)
 }
 
@@ -831,6 +875,7 @@ class GhosttyApp {
         var opacity = defaultBackgroundOpacity
         let opacityKey = "background-opacity"
         _ = ghostty_config_get(config, &opacity, opacityKey, UInt(opacityKey.lengthOfBytes(using: .utf8)))
+        opacity = min(1.0, max(0.0, opacity))
         applyDefaultBackground(
             color: resolvedColor,
             opacity: opacity,
@@ -1344,20 +1389,48 @@ class GhosttyApp {
         case GHOSTTY_ACTION_OPEN_URL:
             let openUrl = action.action.open_url
             guard let cstr = openUrl.url else { return false }
-            let urlString = String(cString: cstr)
-            guard let target = resolveTerminalOpenURLTarget(urlString) else { return false }
+            let urlString = String(
+                data: Data(bytes: cstr, count: Int(openUrl.len)),
+                encoding: .utf8
+            ) ?? ""
+            #if DEBUG
+            dlog("link.openURL raw=\(urlString)")
+            #endif
+            guard let target = resolveTerminalOpenURLTarget(urlString) else {
+                #if DEBUG
+                dlog("link.openURL resolve failed, returning false")
+                #endif
+                return false
+            }
             if !BrowserLinkOpenSettings.openTerminalLinksInCmuxBrowser() {
+                #if DEBUG
+                dlog("link.openURL cmuxBrowser=disabled, opening externally url=\(target.url)")
+                #endif
                 return performOnMain {
                     NSWorkspace.shared.open(target.url)
                 }
             }
             switch target {
             case let .external(url):
+                #if DEBUG
+                dlog("link.openURL target=external, opening externally url=\(url)")
+                #endif
                 return performOnMain {
                     NSWorkspace.shared.open(url)
                 }
             case let .embeddedBrowser(url):
+                if BrowserLinkOpenSettings.shouldOpenExternally(url) {
+                    #if DEBUG
+                    dlog("link.openURL target=embedded but shouldOpenExternally=true url=\(url)")
+                    #endif
+                    return performOnMain {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
                 guard let host = BrowserInsecureHTTPSettings.normalizeHost(url.host ?? "") else {
+                    #if DEBUG
+                    dlog("link.openURL target=embedded but normalizeHost=nil host=\(url.host ?? "nil") url=\(url)")
+                    #endif
                     return performOnMain {
                         NSWorkspace.shared.open(url)
                     }
@@ -1365,21 +1438,41 @@ class GhosttyApp {
 
                 // If a host whitelist is configured and this host isn't in it, open externally.
                 if !BrowserLinkOpenSettings.hostMatchesWhitelist(host) {
+                    #if DEBUG
+                    dlog("link.openURL target=embedded but hostWhitelist miss host=\(host) url=\(url)")
+                    #endif
                     return performOnMain {
                         NSWorkspace.shared.open(url)
                     }
                 }
                 guard let tabId = surfaceView.tabId,
-                      let surfaceId = surfaceView.terminalSurface?.id else { return false }
+                      let surfaceId = surfaceView.terminalSurface?.id else {
+                    #if DEBUG
+                    dlog("link.openURL target=embedded but tabId/surfaceId=nil")
+                    #endif
+                    return false
+                }
+                #if DEBUG
+                dlog("link.openURL target=embedded, opening in browser pane host=\(host) url=\(url) tabId=\(tabId) surfaceId=\(surfaceId)")
+                #endif
                 return performOnMain {
                     guard let app = AppDelegate.shared,
                           let tabManager = app.tabManagerFor(tabId: tabId) ?? app.tabManager,
                           let workspace = tabManager.tabs.first(where: { $0.id == tabId }) else {
+                        #if DEBUG
+                        dlog("link.openURL embedded but workspace lookup failed tabId=\(tabId)")
+                        #endif
                         return false
                     }
                     if let targetPane = workspace.preferredBrowserTargetPane(fromPanelId: surfaceId) {
+                        #if DEBUG
+                        dlog("link.openURL opening in existing browser pane=\(targetPane)")
+                        #endif
                         return workspace.newBrowserSurface(inPane: targetPane, url: url, focus: true) != nil
                     } else {
+                        #if DEBUG
+                        dlog("link.openURL opening as new browser split from surface=\(surfaceId)")
+                        #endif
                         return workspace.newBrowserSplit(from: surfaceId, orientation: .horizontal, url: url) != nil
                     }
                 }
@@ -1391,11 +1484,11 @@ class GhosttyApp {
 
     private func applyBackgroundToKeyWindow() {
         guard let window = activeMainWindow() else { return }
-        if cmuxShouldUseTransparentBackgroundWindow() {
-            window.backgroundColor = .clear
+        if cmuxShouldUseClearWindowBackground(for: defaultBackgroundOpacity) {
+            window.backgroundColor = cmuxTransparentWindowBaseColor()
             window.isOpaque = false
             if backgroundLogEnabled {
-                logBackground("applied transparent window for behindWindow blur")
+                logBackground("applied transparent window background opacity=\(String(format: "%.3f", defaultBackgroundOpacity))")
             }
         } else {
             let color = defaultBackgroundColor.withAlphaComponent(defaultBackgroundOpacity)
@@ -2334,8 +2427,10 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         if let layer {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            layer.backgroundColor = color.cgColor
-            layer.isOpaque = color.alphaComponent >= 1.0
+            // GhosttySurfaceScrollView owns the panel background fill. Keeping this layer clear
+            // avoids stacking multiple identical translucent backgrounds (which looks opaque).
+            layer.backgroundColor = NSColor.clear.cgColor
+            layer.isOpaque = false
             CATransaction.commit()
         }
         terminalSurface?.hostedView.setBackgroundColor(color)
@@ -2361,15 +2456,15 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         }
         applySurfaceBackground()
         let color = effectiveBackgroundColor()
-        if cmuxShouldUseTransparentBackgroundWindow() {
-            window.backgroundColor = .clear
+        if cmuxShouldUseClearWindowBackground(for: color.alphaComponent) {
+            window.backgroundColor = cmuxTransparentWindowBaseColor()
             window.isOpaque = false
         } else {
             window.backgroundColor = color
             window.isOpaque = color.alphaComponent >= 1.0
         }
         if GhosttyApp.shared.backgroundLogEnabled {
-            let signature = "\(cmuxShouldUseTransparentBackgroundWindow() ? "transparent" : color.hexString()):\(String(format: "%.3f", color.alphaComponent))"
+            let signature = "\(cmuxShouldUseClearWindowBackground(for: color.alphaComponent) ? "transparent" : color.hexString()):\(String(format: "%.3f", color.alphaComponent))"
             if signature != lastLoggedWindowBackgroundSignature {
                 lastLoggedWindowBackgroundSignature = signature
                 let hasOverride = backgroundColor != nil
@@ -2377,7 +2472,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
                 let defaultHex = GhosttyApp.shared.defaultBackgroundColor.hexString()
                 let source = hasOverride ? "surfaceOverride" : "defaultBackground"
                 GhosttyApp.shared.logBackground(
-                    "window background applied tab=\(tabId?.uuidString ?? "unknown") surface=\(terminalSurface?.id.uuidString ?? "unknown") source=\(source) override=\(overrideHex) default=\(defaultHex) transparent=\(cmuxShouldUseTransparentBackgroundWindow()) color=\(color.hexString()) opacity=\(String(format: "%.3f", color.alphaComponent))"
+                    "window background applied tab=\(tabId?.uuidString ?? "unknown") surface=\(terminalSurface?.id.uuidString ?? "unknown") source=\(source) override=\(overrideHex) default=\(defaultHex) transparent=\(cmuxShouldUseClearWindowBackground(for: color.alphaComponent)) color=\(color.hexString()) opacity=\(String(format: "%.3f", color.alphaComponent))"
                 )
             }
         }
@@ -2690,20 +2785,96 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
         _ = performBindingAction("copy_to_clipboard")
     }
 
+    // MARK: - Clipboard image paste
+
+    private static let maxClipboardImageSize = 10 * 1024 * 1024  // 10 MB
+
+    /// Quick check: does the clipboard have image data and no text?
+    private static func clipboardHasImageOnly() -> Bool {
+        let pb = NSPasteboard.general
+        let types = pb.types ?? []
+        let hasText = types.contains(.string) || types.contains(.html)
+            || types.contains(.rtf) || types.contains(.rtfd)
+        if hasText { return false }
+        return types.contains(.tiff) || types.contains(.png)
+    }
+
+    /// When the clipboard contains only image data (no text/HTML), saves it as
+    /// a temporary PNG file and returns the file path. Returns nil if the
+    /// clipboard contains text or no image.
+    private static func saveClipboardImageIfNeeded() -> String? {
+        let pb = NSPasteboard.general
+        let types = pb.types ?? []
+
+        // If pasteboard has text/HTML, this is a normal copy — let Ghostty handle it.
+        let hasText = types.contains(.string) || types.contains(.html)
+            || types.contains(.rtf) || types.contains(.rtfd)
+        if hasText { return nil }
+
+        // Check for image types (TIFF from screenshots, PNG from some tools).
+        guard types.contains(.tiff) || types.contains(.png) else { return nil }
+        guard let image = NSImage(pasteboard: pb),
+              let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else { return nil }
+
+        guard pngData.count <= maxClipboardImageSize else {
+#if DEBUG
+            dlog("terminal.paste.image.rejected reason=tooLarge bytes=\(pngData.count)")
+#endif
+            return nil
+        }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let timestamp = formatter.string(from: Date())
+        let filename = "clipboard-\(timestamp)-\(UUID().uuidString.prefix(8)).png"
+        let path = (NSTemporaryDirectory() as NSString).appendingPathComponent(filename)
+
+        do {
+            try pngData.write(to: URL(fileURLWithPath: path))
+        } catch {
+#if DEBUG
+            dlog("terminal.paste.image.writeFailed error=\(error.localizedDescription)")
+#endif
+            return nil
+        }
+
+        return path
+    }
+
+    /// Pastes clipboard content into the terminal. If the clipboard contains only
+    /// image data, saves it as a temporary PNG and pastes the shell-escaped file path.
     @IBAction func paste(_ sender: Any?) {
+        // When the clipboard contains only image data (e.g. from Cmd+Ctrl+Shift+4
+        // screenshot), save it as a temporary PNG and paste the file path so that
+        // CLI tools like Claude Code can accept the image.
+        if let path = Self.saveClipboardImageIfNeeded() {
+#if DEBUG
+            dlog("terminal.paste.image path=\(path)")
+#endif
+            terminalSurface?.sendText(Self.escapeDropForShell(path))
+            return
+        }
         _ = performBindingAction("paste_from_clipboard")
     }
 
+    /// Pastes clipboard text as plain text, stripping any rich formatting.
     @IBAction func pasteAsPlainText(_ sender: Any?) {
         _ = performBindingAction("paste_from_clipboard")
     }
 
+    /// Validates whether edit menu items (copy, paste, split) should be enabled.
     func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
         switch item.action {
         case #selector(copy(_:)):
             guard let surface = surface else { return false }
             return ghostty_surface_has_selection(surface)
-        case #selector(paste(_:)), #selector(pasteAsPlainText(_:)):
+        case #selector(paste(_:)):
+            return GhosttyPasteboardHelper.hasString(for: GHOSTTY_CLIPBOARD_STANDARD)
+                || Self.clipboardHasImageOnly()
+        case #selector(pasteAsPlainText(_:)):
             return GhosttyPasteboardHelper.hasString(for: GHOSTTY_CLIPBOARD_STANDARD)
         case #selector(splitHorizontally(_:)), #selector(splitVertically(_:)):
             return canSplitCurrentSurface()
@@ -3337,9 +3508,21 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
 
     // MARK: - Mouse Handling
 
+    #if DEBUG
+    private func debugModifierString(_ flags: NSEvent.ModifierFlags) -> String {
+        [
+            flags.contains(.command) ? "cmd" : nil,
+            flags.contains(.shift) ? "shift" : nil,
+            flags.contains(.control) ? "ctrl" : nil,
+            flags.contains(.option) ? "opt" : nil,
+        ].compactMap { $0 }.joined(separator: "+")
+    }
+    #endif
+
     override func mouseDown(with event: NSEvent) {
         #if DEBUG
-        dlog("terminal.mouseDown surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil")")
+        let debugPoint = convert(event.locationInWindow, from: nil)
+        dlog("terminal.mouseDown surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") mods=[\(debugModifierString(event.modifierFlags))] clickCount=\(event.clickCount) point=(\(String(format: "%.0f", debugPoint.x)),\(String(format: "%.0f", debugPoint.y)))")
         #endif
         window?.makeFirstResponder(self)
         guard let surface = surface else { return }
@@ -3349,6 +3532,9 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
     }
 
     override func mouseUp(with event: NSEvent) {
+        #if DEBUG
+        dlog("terminal.mouseUp surface=\(terminalSurface?.id.uuidString.prefix(5) ?? "nil") mods=[\(debugModifierString(event.modifierFlags))]")
+        #endif
         guard let surface = surface else { return }
         _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, modsFromEvent(event))
     }
@@ -3810,6 +3996,13 @@ final class GhosttySurfaceScrollView: NSView {
     private var pendingDropZone: DropZone?
     private var dropZoneOverlayAnimationGeneration: UInt64 = 0
     // Intentionally no focus retry loops: rely on AppKit first-responder and bonsplit selection.
+
+    private static func panelBackgroundFillColor(for terminalBackgroundColor: NSColor) -> NSColor {
+        // The Ghostty renderer already draws translucent terminal backgrounds. If we paint an
+        // additional translucent layer here, alpha stacks and appears effectively opaque.
+        terminalBackgroundColor.alphaComponent < 0.999 ? .clear : terminalBackgroundColor
+    }
+
 #if DEBUG
     private var lastDropZoneOverlayLogSignature: String?
 	    private static var flashCounts: [UUID: Int] = [:]
@@ -3949,10 +4142,11 @@ final class GhosttySurfaceScrollView: NSView {
         layer?.masksToBounds = true
 
         backgroundView.wantsLayer = true
-        backgroundView.layer?.backgroundColor =
-            GhosttyApp.shared.defaultBackgroundColor
-                .withAlphaComponent(GhosttyApp.shared.defaultBackgroundOpacity)
-                .cgColor
+        let initialTerminalBackground = GhosttyApp.shared.defaultBackgroundColor
+            .withAlphaComponent(GhosttyApp.shared.defaultBackgroundOpacity)
+        let initialPanelFill = Self.panelBackgroundFillColor(for: initialTerminalBackground)
+        backgroundView.layer?.backgroundColor = initialPanelFill.cgColor
+        backgroundView.layer?.isOpaque = initialPanelFill.alphaComponent >= 1.0
         addSubview(backgroundView)
         addSubview(scrollView)
         inactiveOverlayView.wantsLayer = true
@@ -4167,9 +4361,11 @@ final class GhosttySurfaceScrollView: NSView {
 
     func setBackgroundColor(_ color: NSColor) {
         guard let layer = backgroundView.layer else { return }
+        let fillColor = Self.panelBackgroundFillColor(for: color)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        layer.backgroundColor = color.cgColor
+        layer.backgroundColor = fillColor.cgColor
+        layer.isOpaque = fillColor.alphaComponent >= 1.0
         CATransaction.commit()
     }
 
