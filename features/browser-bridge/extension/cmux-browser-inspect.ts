@@ -102,10 +102,9 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 					const pickId = pickCounter;
 					const formatted = formatElement(el, pickId);
 
-					// Add as a custom message with the pick ID in the title.
 					pi.sendMessage({
 						customType: "browser-pick",
-						content: `[browser-pick: <${pickId}>]\n${formatted}`,
+						content: `<${pickId}>\n\n${formatted}`,
 						display: "user",
 					}, { triggerTurn: false });
 
