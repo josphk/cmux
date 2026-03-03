@@ -82,6 +82,13 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	/** Pending picks indexed by ID. Only referenced picks are sent to the LLM. */
 	const pendingPicks = new Map<number, { formatted: string }>();
 
+	// ── ANSI helpers for blue styling ─────────────────────────────────────
+	const BLUE = "\x1b[38;5;33m";    // bright blue foreground
+	const BLUE_DIM = "\x1b[38;5;67m"; // muted blue
+	const BLUE_BG = "\x1b[48;5;17m"; // dark blue background
+	const BOLD = "\x1b[1m";
+	const RESET = "\x1b[0m";
+
 	/** Update the picks widget below the editor. */
 	function updatePicksWidget(): void {
 		if (!uiRef) return;
@@ -89,11 +96,30 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 			uiRef.setWidget("browser-picks", undefined);
 			return;
 		}
-		const lines: string[] = [];
-		for (const [id, pick] of pendingPicks) {
-			lines.push(`<${id}>  ${pick.formatted}`);
-		}
-		uiRef.setWidget("browser-picks", lines, { placement: "belowEditor" });
+
+		uiRef.setWidget("browser-picks", (_tui, _theme) => {
+			let cachedLines: string[] | null = null;
+			return {
+				invalidate() { cachedLines = null; },
+				render(width: number): string[] {
+					if (cachedLines) return cachedLines;
+					const lines: string[] = [];
+					const pad = (s: string) => `${BLUE_BG} ${s}${RESET}${BLUE_BG}${" ".repeat(Math.max(0, width - visibleLen(s) - 2))} ${RESET}`;
+
+					for (const [id, pick] of pendingPicks) {
+						if (lines.length > 0) lines.push(""); // spacing between picks
+						lines.push(pad(`${BOLD}${BLUE}<${id}>${RESET}${BLUE_BG}  ${BLUE_DIM}${pick.formatted}${RESET}`));
+					}
+					cachedLines = lines;
+					return lines;
+				},
+			};
+		}, { placement: "belowEditor" });
+	}
+
+	/** Calculate visible length of a string (excluding ANSI escapes). */
+	function visibleLen(s: string): number {
+		return s.replace(/\x1b\[[0-9;]*m/g, "").length;
 	}
 
 	// ── Bridge file processing ────────────────────────────────────────────
