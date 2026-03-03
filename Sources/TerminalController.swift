@@ -7909,6 +7909,12 @@ class TerminalController {
         let callerSurface = v2UUID(params, "caller_surface_id") ?? surfaceId
         let bridgeFile = bridgeDir.appendingPathComponent("\(callerSurface.uuidString).jsonl")
 
+        // Record existing line count so we only return picks from this session.
+        let preExistingLines: Int = {
+            guard let content = try? String(contentsOf: bridgeFile, encoding: .utf8) else { return 0 }
+            return content.split(separator: "\n", omittingEmptySubsequences: true).count
+        }()
+
         let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
         let pollInterval: TimeInterval = 0.2
         var timedOut = true
@@ -7935,8 +7941,8 @@ class TerminalController {
             Thread.sleep(forTimeInterval: 0.1)
         }
 
-        // Read all picks from the bridge JSONL file.
-        let picksResult = readAllInspectionPicks(from: bridgeFile)
+        // Read only new picks from the bridge JSONL file (skip pre-existing lines).
+        let picksResult = readAllInspectionPicks(from: bridgeFile, skipLines: preExistingLines)
 
         var result: [String: Any] = [
             "status": timedOut ? "timeout" : "completed",
@@ -7950,7 +7956,7 @@ class TerminalController {
     }
 
     /// Read all element picks from a JSONL bridge file.
-    private func readAllInspectionPicks(from url: URL) -> [String: Any] {
+    private func readAllInspectionPicks(from url: URL, skipLines: Int = 0) -> [String: Any] {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return ["picks": [] as [Any]]
         }
@@ -7958,7 +7964,8 @@ class TerminalController {
               let contents = String(data: data, encoding: .utf8) else {
             return ["picks": [] as [Any]]
         }
-        let lines = contents.components(separatedBy: .newlines)
+        let allLines = contents.split(separator: "\n", omittingEmptySubsequences: true)
+        let lines = allLines.dropFirst(skipLines)
         var picks: [[String: Any]] = []
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
