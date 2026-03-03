@@ -89,15 +89,21 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	const BOLD = "\x1b[1m";
 	const RESET = "\x1b[0m";
 
-	/** Update the picks widget below the editor. */
-	function updatePicksWidget(): void {
+	/** Re-render both belowEditor widgets in order: status indicator, then picks. */
+	function updateBelowEditorWidgets(): void {
 		if (!uiRef) return;
-		if (pendingPicks.size === 0) {
-			uiRef.setWidget("browser-picks", undefined);
-			return;
-		}
 
-		uiRef.setWidget("browser-picks", (_tui, _theme) => {
+		// Clear both first to reset Map insertion order.
+		uiRef.setWidget("browser-bridge-status", undefined);
+		uiRef.setWidget("browser-picks", undefined);
+
+		// 1. Status indicator (first = above picks).
+		checkActiveTarget();
+
+		// 2. Picks widget.
+		if (pendingPicks.size === 0) return;
+
+		uiRef.setWidget("browser-picks", (_tui: unknown, _theme: unknown) => {
 			let cachedLines: string[] | null = null;
 			return {
 				invalidate() { cachedLines = null; },
@@ -113,7 +119,6 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 						const maxDataLen = width - idVisLen - visibleLen(sep) - 2; // 2 for padding
 						let data = pick.formatted;
 						if (visibleLen(data) > maxDataLen) {
-							// Truncate the plain text, keeping ANSI-free for measurement
 							data = data.slice(0, Math.max(0, maxDataLen - 1)) + "…";
 						}
 						const content = `${idStr}${sep}${BLUE_DIM}${data}${RESET}`;
@@ -157,9 +162,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 
 					// Store for later — full data only injected if referenced in the user message.
 					pendingPicks.set(pickId, { formatted });
-					updatePicksWidget();
-					// Re-set status so it stays below picks (Map insertion order).
-					checkActiveTarget();
+					updateBelowEditorWidgets();
 
 					// Auto-append the pick reference to the editor.
 					const currentText = uiRef.getEditorText();
@@ -276,7 +279,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 		if (targetWatcher) return;
 		try {
 			targetWatcher = fs.watch(BRIDGE_DIR, (_eventType, filename) => {
-				if (filename === "active-target" || filename === "inspecting") checkActiveTarget();
+				if (filename === "active-target" || filename === "inspecting") updateBelowEditorWidgets();
 			});
 			targetWatcher.on("error", () => {});
 		} catch {}
@@ -291,7 +294,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		startWatching();
 		uiRef = ctx.ui;
-		checkActiveTarget();
+		updateBelowEditorWidgets();
 		startTargetWatcher();
 	});
 
@@ -299,7 +302,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	pi.on("turn_start", async (_event, ctx) => {
 		if (!uiRef) {
 			uiRef = ctx.ui;
-			checkActiveTarget();
+			updateBelowEditorWidgets();
 		}
 	});
 
@@ -334,7 +337,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 		// Reset for next round of picks.
 		pickCounter = 0;
 		pendingPicks.clear();
-		updatePicksWidget();
+		updateBelowEditorWidgets();
 
 		return result;
 	});
