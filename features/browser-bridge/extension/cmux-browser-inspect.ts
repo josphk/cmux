@@ -104,11 +104,22 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 				render(width: number): string[] {
 					if (cachedLines) return cachedLines;
 					const lines: string[] = [];
-					const pad = (s: string) => `${BLUE_BG} ${s}${RESET}${BLUE_BG}${" ".repeat(Math.max(0, width - visibleLen(s) - 2))} ${RESET}`;
 
 					for (const [id, pick] of pendingPicks) {
 						if (lines.length > 0) lines.push(""); // spacing between picks
-						lines.push(pad(`${BOLD}${BLUE}<${id}>${RESET}${BLUE_BG}  ${BLUE_DIM}${pick.formatted}${RESET}`));
+						const idStr = `${BOLD}${BLUE}<${id}>${RESET}${BLUE_BG}`;
+						const sep = "  ";
+						const idVisLen = visibleLen(idStr);
+						const maxDataLen = width - idVisLen - visibleLen(sep) - 2; // 2 for padding
+						let data = pick.formatted;
+						if (visibleLen(data) > maxDataLen) {
+							// Truncate the plain text, keeping ANSI-free for measurement
+							data = data.slice(0, Math.max(0, maxDataLen - 1)) + "…";
+						}
+						const content = `${idStr}${sep}${BLUE_DIM}${data}${RESET}`;
+						const contentVisLen = visibleLen(content);
+						const rightPad = Math.max(0, width - contentVisLen - 2);
+						lines.push(`${BLUE_BG} ${content}${BLUE_BG}${" ".repeat(rightPad)} ${RESET}`);
 					}
 					cachedLines = lines;
 					return lines;
