@@ -140,29 +140,15 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 
 	// ── Bridge file processing ────────────────────────────────────────────
 
-	/** What we last wrote to the editor via setEditorText.
-	 *  Used to detect and strip phantom pick IDs that the TUI widget
-	 *  re-render bleeds into the editor buffer. */
-	let lastSetText = "";
-
-	/** Read editor text, stripping any phantom pick IDs appended by widget render corruption.
-	 *  Preserves user-typed text (typing before, between, or after picks). */
-	function getCleanEditorText(): string {
-		const raw = uiRef!.getEditorText();
-		if (!lastSetText) return raw;
-		if (raw === lastSetText) return raw;
-		// If editor starts with our last set text, check if the extra is just phantom <N> refs
-		if (raw.startsWith(lastSetText)) {
-			const tail = raw.slice(lastSetText.length);
-			if (/^(\s+<\d+>)+\s*$/.test(tail)) {
-				return lastSetText;
-			}
-			// Extra text isn't phantom picks — user typed something, keep it
-			return raw;
-		}
-		// User edited the text (deleted chars, inserted in middle, etc.) — keep as-is
-		// but still collapse any consecutive duplicate <N> refs as a safety net
-		return raw.replace(/(<\d+>)( \1)+/g, "$1");
+	/** Strip phantom <N> refs from editor text. Any <N> where N is NOT in
+	 *  pendingPicks is a ghost injected by TUI widget-render corruption.
+	 *  Called BEFORE adding the new pick so incoming ID is also caught. */
+	function cleanEditorText(raw: string): string {
+		return raw
+			.replace(/<(\d+)>/g, (match, num) =>
+				pendingPicks.has(parseInt(num, 10)) ? match : "")
+			.replace(/\s{2,}/g, " ")
+			.trim();
 	}
 
 	/** Read new lines from this agent's bridge file and deliver them to the chat. */
@@ -185,15 +171,13 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 					const pickId = pickCounter;
 					const formatted = formatElement(el, pickId);
 
-					// Store for later — full data only injected if referenced in the user message.
+					// Clean editor BEFORE adding to pendingPicks — phantom <pickId>
+					// refs from corruption aren't in the map yet, so they get stripped.
+					const currentText = cleanEditorText(uiRef.getEditorText());
 					pendingPicks.set(pickId, { formatted });
 
-					// Auto-append the pick reference to the editor.
-					const currentText = getCleanEditorText();
 					const separator = currentText.length > 0 ? " " : "";
-					const newText = `${currentText}${separator}<${pickId}>`;
-					lastSetText = newText;
-					uiRef.setEditorText(newText);
+					uiRef.setEditorText(`${currentText}${separator}<${pickId}>`);
 				} catch {
 					// malformed JSONL line — skip
 				}
@@ -336,13 +320,15 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 		let result: { message: { customType: string; content: string; display: boolean } } | undefined;
 
 		if (pendingPicks.size > 0) {
-			// Find all <N> references in the user's prompt.
+			// Find all <N> references in the user's prompt (deduplicated).
+			const seen = new Set<number>();
 			const referencedIds: number[] = [];
 			const refPattern = /<(\d+)>/g;
 			let match: RegExpExecArray | null;
 			while ((match = refPattern.exec(event.prompt)) !== null) {
 				const id = parseInt(match[1], 10);
-				if (pendingPicks.has(id)) {
+				if (pendingPicks.has(id) && !seen.has(id)) {
+					seen.add(id);
 					referencedIds.push(id);
 				}
 			}
