@@ -299,6 +299,7 @@ struct BrowserPanelView: View {
     var body: some View {
         VStack(spacing: 0) {
             addressBar
+            inspectionBanner
             webView
         }
         .overlay {
@@ -465,6 +466,7 @@ struct BrowserPanelView: View {
                 .accessibilityLabel("Browser omnibar")
 
             if !panel.isShowingNewTabPage {
+                inspectionPickerButton
                 browserThemeModeButton
                 developerToolsButton
             }
@@ -544,6 +546,61 @@ struct BrowserPanelView: View {
                 .help("Download in progress")
             }
         }
+    }
+
+    /// Toggle inspection mode, resolving the target terminal surface to deliver picks to.
+    private func toggleInspectionMode() {
+        if panel.isInspectionModeActive {
+            panel.disableInspectionMode()
+            return
+        }
+
+        panel.enableInspectionMode()
+    }
+
+    @ViewBuilder
+    private var inspectionBanner: some View {
+        if panel.isInspectionModeActive {
+            HStack(spacing: 6) {
+                Image(systemName: "scope")
+                    .font(.system(size: 11))
+                    .foregroundColor(.accentColor)
+                Text("Click elements to reference in chat")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color.accentColor.opacity(0.08))
+        }
+    }
+
+    @ObservedObject private var bridgeWatcher = BrowserBridgeWatcher.shared
+
+    private var hasConnectedAgent: Bool {
+        panel.resolveTargetTerminal() != nil
+    }
+
+    private var inspectionPickerButton: some View {
+        // Access bridgeWatcher.connectedSurfaceIds to trigger re-render on changes.
+        let _ = bridgeWatcher.connectedSurfaceIds
+        let connected = panel.isInspectionModeActive || hasConnectedAgent
+        return Button(action: {
+            toggleInspectionMode()
+        }) {
+            Image(systemName: "scope")
+                .symbolRenderingMode(.monochrome)
+                .cmuxFlatSymbolColorRendering()
+                .font(.system(size: devToolsButtonIconSize, weight: panel.isInspectionModeActive ? .bold : .medium))
+                .foregroundStyle(panel.isInspectionModeActive ? Color.accentColor : connected ? devToolsColorOption.color : devToolsColorOption.color.opacity(0.3))
+                .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
+        }
+        .buttonStyle(OmnibarAddressButtonStyle())
+        .disabled(!connected)
+        .frame(width: addressBarButtonSize, height: addressBarButtonSize, alignment: .center)
+        .help("Toggle Pick Mode (⌘⇧I)")
+        .accessibilityIdentifier("BrowserInspectionPickerButton")
     }
 
     private var developerToolsButton: some View {

@@ -1486,6 +1486,8 @@ class TerminalController {
             return v2Result(id: id, self.v2BrowserInputKeyboard(params: params))
         case "browser.input_touch":
             return v2Result(id: id, self.v2BrowserInputTouch(params: params))
+        case "browser.inspect":
+            return v2Result(id: id, self.v2BrowserInspect(params: params))
         case "surface.read_text":
             return v2Result(id: id, self.v2SurfaceReadText(params: params))
 
@@ -1712,6 +1714,7 @@ class TerminalController {
             "browser.input_mouse",
             "browser.input_keyboard",
             "browser.input_touch",
+            "browser.inspect",
         ]
 #if DEBUG
         methods.append(contentsOf: [
@@ -7837,6 +7840,143 @@ class TerminalController {
             })()
             """
         }
+    }
+
+    // MARK: - browser.inspect
+
+    private func v2BrowserInspect(params: [String: Any]) -> V2CallResult {
+        let wait = v2Bool(params, "wait") ?? false
+        let timeoutMs = max(1, v2Int(params, "timeout_ms") ?? 30_000)
+
+        // Resolve the browser panel on the main thread (required for AppKit/model access).
+        var resolvedSurfaceId: UUID?
+        var resolvedPanel: BrowserPanel?
+        var resolvedWorkspace: Workspace?
+        var resolveError: V2CallResult?
+
+        v2MainSync {
+            guard let tabManager = v2ResolveTabManager(params: params) else {
+                resolveError = .err(code: "unavailable", message: "TabManager not available", data: nil)
+                return
+            }
+            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+                resolveError = .err(code: "not_found", message: "Workspace not found", data: nil)
+                return
+            }
+            let surfaceId = v2UUID(params, "surface_id") ?? ws.focusedPanelId
+            guard let surfaceId else {
+                resolveError = .err(code: "not_found", message: "No focused browser surface", data: nil)
+                return
+            }
+            guard let browserPanel = ws.browserPanel(for: surfaceId) else {
+                resolveError = .err(code: "invalid_params", message: "Surface is not a browser", data: ["surface_id": surfaceId.uuidString])
+                return
+            }
+            resolvedSurfaceId = surfaceId
+            resolvedPanel = browserPanel
+            resolvedWorkspace = ws
+        }
+
+        if let resolveError { return resolveError }
+        guard let surfaceId = resolvedSurfaceId,
+              let browserPanel = resolvedPanel,
+              let ws = resolvedWorkspace else {
+            return .err(code: "internal_error", message: "Failed to resolve browser panel", data: nil)
+        }
+
+        if !wait {
+            // Non-wait mode: enable inspection and return immediately.
+            DispatchQueue.main.async {
+                browserPanel.inspectionSurfaceId = surfaceId.uuidString
+                browserPanel.enableInspectionMode()
+            }
+            return .ok([
+                "status": "enabled",
+                "surface_id": surfaceId.uuidString,
+            ])
+        }
+
+        // Wait mode: enable inspection, then poll until user finishes (ESC) or timeout.
+        // CRITICAL: The polling loop runs OFF the main thread to avoid deadlocking the app.
+        //           We only dispatch to main for the initial enable and final disable.
+        DispatchQueue.main.async {
+            browserPanel.inspectionSurfaceId = surfaceId.uuidString
+            browserPanel.enableInspectionMode()
+        }
+
+        // Build bridge file path for the caller's surface to read picks.
+        let bridgeDir = URL(fileURLWithPath: "/tmp/cmux-browser-bridge", isDirectory: true)
+        let callerSurface = v2UUID(params, "caller_surface_id") ?? surfaceId
+        let bridgeFile = bridgeDir.appendingPathComponent("\(callerSurface.uuidString).jsonl")
+
+        // Record existing line count so we only return picks from this session.
+        let preExistingLines: Int = {
+            guard let content = try? String(contentsOf: bridgeFile, encoding: .utf8) else { return 0 }
+            return content.split(separator: "\n", omittingEmptySubsequences: true).count
+        }()
+
+        let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
+        let pollInterval: TimeInterval = 0.2
+        var timedOut = true
+
+        while Date() < deadline {
+            // Check if the user has finished inspection (pressed ESC).
+            var isActive = true
+            v2MainSync {
+                isActive = browserPanel.isInspectionModeActive
+            }
+            if !isActive {
+                timedOut = false
+                break
+            }
+            Thread.sleep(forTimeInterval: pollInterval)
+        }
+
+        if timedOut {
+            // Disable inspection mode on timeout so the overlay doesn't linger.
+            DispatchQueue.main.async {
+                browserPanel.disableInspectionMode()
+            }
+            // Brief pause to let the disable take effect and any final writes flush.
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+
+        // Read only new picks from the bridge JSONL file (skip pre-existing lines).
+        let picksResult = readAllInspectionPicks(from: bridgeFile, skipLines: preExistingLines)
+
+        var result: [String: Any] = [
+            "status": timedOut ? "timeout" : "completed",
+            "surface_id": surfaceId.uuidString,
+        ]
+        if let picks = picksResult["picks"] as? [Any] {
+            result["picks"] = picks
+            result["pick_count"] = picks.count
+        }
+        return .ok(result)
+    }
+
+    /// Read all element picks from a JSONL bridge file.
+    private func readAllInspectionPicks(from url: URL, skipLines: Int = 0) -> [String: Any] {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return ["picks": [] as [Any]]
+        }
+        guard let data = try? Data(contentsOf: url),
+              let contents = String(data: data, encoding: .utf8) else {
+            return ["picks": [] as [Any]]
+        }
+        let allLines = contents.split(separator: "\n", omittingEmptySubsequences: true)
+        let lines = allLines.dropFirst(skipLines)
+        var picks: [[String: Any]] = []
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            guard let lineData = trimmed.data(using: .utf8),
+                  let parsed = try? JSONSerialization.jsonObject(with: lineData, options: []) as? [String: Any] else {
+                continue
+            }
+            picks.append(parsed)
+        }
+        return ["picks": picks]
     }
 
     private func v2BrowserStateSave(params: [String: Any]) -> V2CallResult {

@@ -1338,6 +1338,21 @@ final class BrowserPanel: Panel, ObservableObject {
     /// Increment to request a UI-only flash highlight (e.g. from a keyboard shortcut).
     @Published private(set) var focusFlashToken: Int = 0
 
+    // MARK: - Inspection mode (browser-bridge)
+
+    /// Whether browser inspection/picker mode is active.
+    @Published private(set) var isInspectionModeActive: Bool = false
+
+    /// Count of elements picked in the current inspection session.
+    @Published private(set) var inspectionPickCount: Int = 0
+
+    /// The surface ID for this browser panel (set by socket command or defaulted to panel ID).
+    var inspectionSurfaceId: String = ""
+
+    /// The target terminal surface ID that picks should be delivered to.
+    /// Set before enabling inspection mode. If empty, inspection won't enable.
+
+
     /// Sticky omnibar-focus intent. This survives view mount timing races and is
     /// cleared only after BrowserPanelView acknowledges handling it.
     @Published private(set) var pendingAddressBarFocusRequestId: UUID?
@@ -1418,6 +1433,11 @@ final class BrowserPanel: Panel, ObservableObject {
             )
         )
 
+        // Register message handler for browser inspection/picker mode (browser-bridge).
+        // The handler reference is stored as a weak wrapper to avoid retain cycles.
+        let inspectHandler = InspectionMessageHandler()
+        config.userContentController.add(inspectHandler, name: "cmuxInspect")
+
         // Set up web view
         let webView = CmuxWebView(frame: .zero, configuration: config)
         webView.allowsBackForwardNavigationGestures = true
@@ -1447,6 +1467,15 @@ final class BrowserPanel: Panel, ObservableObject {
             Task { @MainActor [weak self] in
                 self?.refreshFavicon(from: webView)
                 self?.applyBrowserThemeModeIfNeeded()
+            }
+        }
+        navDelegate.didCommitNavigation = { [weak self] in
+            Task { @MainActor in
+                guard let self, self.isInspectionModeActive else { return }
+                self.disableInspectionMode()
+                #if DEBUG
+                dlog("browser.inspect.navigationGuard: auto-cancelled inspection on page commit")
+                #endif
             }
         }
         navDelegate.didFailNavigation = { [weak self] _, failedURL in
@@ -1509,6 +1538,9 @@ final class BrowserPanel: Panel, ObservableObject {
         setupObservers()
         applyBrowserThemeModeIfNeeded()
 
+        // Wire the inspection message handler back to self now that init is complete.
+        inspectHandler.panel = self
+
         // Navigate to initial URL if provided
         if let url = initialURL {
             shouldRenderWebView = true
@@ -1546,6 +1578,360 @@ final class BrowserPanel: Panel, ObservableObject {
 
     func triggerFlash() {
         focusFlashToken &+= 1
+    }
+
+    // MARK: - Inspection mode (browser-bridge)
+
+    // swiftlint:disable line_length
+    /// Inline JS for inspection mode. Inlined to avoid path resolution issues across
+    /// debug/release/tagged builds. Source of truth: features/browser-bridge/inspection-mode.js
+    private static let inspectionModeScript = """
+    (function() {
+      if (window.__cmuxInspectActive) return;
+      window.__cmuxInspectActive = true;
+
+      const OVERLAY_COLOR_BG = 'rgba(59, 130, 246, 0.15)';
+      const OVERLAY_COLOR_BORDER = 'rgba(59, 130, 246, 0.6)';
+      const FLASH_COLOR_BORDER = 'rgba(34, 197, 94, 0.3)';
+      const TOOLTIP_BG = 'rgba(0,0,0,0.85)';
+      const Z = 2147483647;
+      const ATTR = 'data-cmux-inspect';
+
+      const cursorStyle = document.createElement('style');
+      cursorStyle.setAttribute(ATTR, 'cursor');
+      cursorStyle.textContent = '* { cursor: crosshair !important; }';
+      document.head.appendChild(cursorStyle);
+
+      const overlay = document.createElement('div');
+      overlay.setAttribute(ATTR, 'overlay');
+      overlay.style.cssText = [
+        'position:fixed','pointer-events:none',
+        'background:' + OVERLAY_COLOR_BG,'border:2px solid ' + OVERLAY_COLOR_BORDER,
+        'z-index:' + Z,'top:0','left:0','width:0','height:0',
+        'display:none','box-sizing:border-box','transition:none'
+      ].join(';');
+      document.body.appendChild(overlay);
+
+      const tooltip = document.createElement('div');
+      tooltip.setAttribute(ATTR, 'tooltip');
+      tooltip.style.cssText = [
+        'position:fixed','pointer-events:none',
+        'background:' + TOOLTIP_BG,'color:white',
+        'font-size:11px','font-family:-apple-system,BlinkMacSystemFont,sans-serif',
+        'padding:4px 8px','border-radius:4px','z-index:' + Z,
+        'white-space:nowrap','display:none','max-width:400px',
+        'overflow:hidden','text-overflow:ellipsis'
+      ].join(';');
+      document.body.appendChild(tooltip);
+
+      let lastTarget = null;
+
+      function detectRole(el) {
+        const explicit = el.getAttribute('role');
+        if (explicit) return explicit;
+        const tag = el.tagName.toLowerCase();
+        const type = (el.getAttribute('type') || '').toLowerCase();
+        const implicitRoles = {
+          'button':'button','a':'link','select':'combobox','img':'img','textarea':'textbox',
+          'h1':'heading','h2':'heading','h3':'heading','h4':'heading','h5':'heading','h6':'heading'
+        };
+        if (implicitRoles[tag]) return implicitRoles[tag];
+        if (tag === 'input') {
+          const inputRoles = {
+            'text':'textbox','search':'textbox','email':'textbox','url':'textbox',
+            'tel':'textbox','password':'textbox','number':'textbox','checkbox':'checkbox','radio':'radio'
+          };
+          return inputRoles[type] || 'textbox';
+        }
+        return tag;
+      }
+
+      function extractLabel(el) {
+        const ariaLabel = el.getAttribute('aria-label');
+        if (ariaLabel) return ariaLabel;
+        const labelledBy = el.getAttribute('aria-labelledby');
+        if (labelledBy) {
+          const ids = labelledBy.split(/\\s+/);
+          const parts = [];
+          for (let i = 0; i < ids.length; i++) {
+            const ref = document.getElementById(ids[i]);
+            if (ref) parts.push(ref.textContent.trim());
+          }
+          if (parts.length) return parts.join(' ');
+        }
+        const text = (el.textContent || '').trim();
+        if (text.length > 80) return text.substring(0, 80) + '\\u2026';
+        return text;
+      }
+
+      function isUnique(selector) {
+        try { const matches = document.querySelectorAll(selector); return matches.length === 1; }
+        catch (e) { return false; }
+      }
+
+      function escapeCSSValue(val) { return val.replace(/"/g, '\\\\"'); }
+
+      function buildSelector(el) {
+        const testId = el.getAttribute('data-testid');
+        if (testId) { const sel = '[data-testid="' + escapeCSSValue(testId) + '"]'; if (isUnique(sel)) return sel; }
+        if (el.id) { const idSel = '#' + CSS.escape(el.id); if (isUnique(idSel)) return idSel; }
+        const tag = el.tagName.toLowerCase();
+        if (el.classList && el.classList.length) {
+          for (let i = 0; i < el.classList.length; i++) {
+            const cls = tag + '.' + CSS.escape(el.classList[i]);
+            if (isUnique(cls)) return cls;
+          }
+          const allClasses = tag + '.' + Array.prototype.map.call(el.classList, function(c) { return CSS.escape(c); }).join('.');
+          if (isUnique(allClasses)) return allClasses;
+        }
+        const tryAttrs = ['name','type','href','src','placeholder'];
+        for (let a = 0; a < tryAttrs.length; a++) {
+          const attrVal = el.getAttribute(tryAttrs[a]);
+          if (attrVal) {
+            const attrSel = tag + '[' + tryAttrs[a] + '="' + escapeCSSValue(attrVal) + '"]';
+            if (isUnique(attrSel)) return attrSel;
+          }
+        }
+        function selfPart(elem) {
+          const t = elem.tagName.toLowerCase();
+          if (elem.id) return '#' + CSS.escape(elem.id);
+          if (elem.classList && elem.classList.length) {
+            return t + '.' + Array.prototype.map.call(elem.classList, function(c) { return CSS.escape(c); }).join('.');
+          }
+          return t;
+        }
+        const parts = [selfPart(el)];
+        let current = el.parentElement;
+        let depth = 0;
+        while (current && current !== document.body && current !== document.documentElement && depth < 3) {
+          parts.unshift(selfPart(current));
+          const candidate = parts.join(' > ');
+          if (isUnique(candidate)) return candidate;
+          current = current.parentElement;
+          depth++;
+        }
+        return tag;
+      }
+
+      function collectAttributes(el) {
+        const attrs = {};
+        const pick = ['type','class','id','name','href','src','alt','placeholder','data-testid','value','aria-label'];
+        for (let i = 0; i < pick.length; i++) {
+          const key = pick[i];
+          let val;
+          if (key === 'value' && ('value' in el)) { val = el.value; } else { val = el.getAttribute(key); }
+          if (val != null && val !== '') { attrs[key] = val; }
+        }
+        return attrs;
+      }
+
+      function onMouseMove(e) {
+        const target = e.target;
+        if (target.hasAttribute && target.hasAttribute(ATTR)) return;
+        lastTarget = target;
+        const rect = target.getBoundingClientRect();
+        overlay.style.top = rect.top + 'px';
+        overlay.style.left = rect.left + 'px';
+        overlay.style.width = rect.width + 'px';
+        overlay.style.height = rect.height + 'px';
+        overlay.style.display = 'block';
+        const role = detectRole(target);
+        const label = extractLabel(target);
+        const isIframe = target.tagName.toLowerCase() === 'iframe';
+        if (isIframe) { tooltip.textContent = 'iframe — inner elements not supported'; }
+        else { tooltip.textContent = role + ': "' + (label || '') + '"'; }
+        let tooltipTop = rect.bottom + 6;
+        let tooltipLeft = rect.left;
+        if (tooltipTop + 24 > window.innerHeight) { tooltipTop = rect.top - 28; }
+        if (tooltipLeft < 0) tooltipLeft = 4;
+        tooltip.style.top = tooltipTop + 'px';
+        tooltip.style.left = tooltipLeft + 'px';
+        tooltip.style.display = 'block';
+      }
+
+      function onClickCapture(e) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const target = e.target;
+        if (target.hasAttribute && target.hasAttribute(ATTR)) return;
+        const data = {
+          selector: buildSelector(target),
+          text: extractLabel(target),
+          role: detectRole(target),
+          tagName: target.tagName,
+          attributes: collectAttributes(target),
+          url: window.location.href,
+          pageTitle: document.title
+        };
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cmuxInspect) {
+          window.webkit.messageHandlers.cmuxInspect.postMessage(data);
+        } else {
+          console.log('[cmuxInspect]', JSON.stringify(data, null, 2));
+        }
+        const prevOutline = target.style.outline;
+        const prevOutlineOffset = target.style.outlineOffset;
+        target.style.outline = '2px solid ' + FLASH_COLOR_BORDER;
+        target.style.outlineOffset = '-1px';
+        setTimeout(function() {
+          target.style.outline = prevOutline;
+          target.style.outlineOffset = prevOutlineOffset;
+        }, 200);
+      }
+
+      function onMouseLeave() { overlay.style.display = 'none'; }
+
+      document.addEventListener('mousemove', onMouseMove, true);
+      document.addEventListener('click', onClickCapture, true);
+      document.documentElement.addEventListener('mouseleave', onMouseLeave, false);
+
+      window.__cmuxInspectCleanup = function() {
+        document.removeEventListener('mousemove', onMouseMove, true);
+        document.removeEventListener('click', onClickCapture, true);
+        document.documentElement.removeEventListener('mouseleave', onMouseLeave, false);
+        const injected = document.querySelectorAll('[' + ATTR + ']');
+        for (let i = 0; i < injected.length; i++) { injected[i].parentNode.removeChild(injected[i]); }
+        window.__cmuxInspectActive = false;
+        delete window.__cmuxInspectCleanup;
+      };
+    })();
+    """
+    // swiftlint:enable line_length
+
+    /// Base directory for bridge files. Uses /tmp/ (not NSTemporaryDirectory) to match
+    /// the pi extension which also writes to /tmp/cmux-browser-bridge/.
+    private static let bridgeBaseDir = URL(fileURLWithPath: "/tmp/cmux-browser-bridge", isDirectory: true)
+
+    /// Shared formatter for pick timestamps.
+    private static let isoFormatter = ISO8601DateFormatter()
+
+    /// Resolve the current target terminal — the last focused terminal with an active agent.
+    /// Returns nil if no terminal has an agent listening.
+    func resolveTargetTerminal() -> UUID? {
+        guard let app = AppDelegate.shared,
+              let manager = app.tabManagerFor(tabId: workspaceId),
+              let workspace = manager.tabs.first(where: { $0.id == workspaceId }) else {
+            return nil
+        }
+        let connected = BrowserBridgeWatcher.shared.connectedSurfaceIds
+        func hasAgent(_ id: UUID) -> Bool {
+            connected.contains(id.uuidString)
+        }
+        if let last = workspace.lastFocusedTerminalPanelId, hasAgent(last) {
+            return last
+        }
+        return workspace.panels.filter { $1.panelType == .terminal }.first(where: { hasAgent($0.key) })?.key
+    }
+
+    /// File URL for the JSONL bridge file, scoped by a target terminal surface ID.
+    func bridgeFileURL(for targetId: UUID) -> URL {
+        Self.bridgeBaseDir.appendingPathComponent("\(targetId.uuidString).jsonl")
+    }
+
+    /// Enable inspection mode. Requires at least one terminal with an active agent.
+    /// Returns false if inspection could not be enabled.
+    @discardableResult
+    func enableInspectionMode() -> Bool {
+        guard !isInspectionModeActive, !isShowingNewTabPage else { return false }
+
+        // Verify at least one agent is listening.
+        guard resolveTargetTerminal() != nil else {
+            #if DEBUG
+            dlog("browser.inspect.noAgent")
+            #endif
+            return false
+        }
+
+        // Default browser surface ID to panel UUID if not set by socket command.
+        if inspectionSurfaceId.isEmpty {
+            inspectionSurfaceId = id.uuidString
+        }
+
+        isInspectionModeActive = true
+        inspectionPickCount = 0
+
+        // Write inspection-active marker so extensions show their indicator.
+        try? FileManager.default.createDirectory(at: Self.bridgeBaseDir, withIntermediateDirectories: true)
+        try? "1".write(to: Self.bridgeBaseDir.appendingPathComponent("inspecting"), atomically: true, encoding: .utf8)
+
+        // Immediately signal the target so the indicator shows on the right agent.
+        if let targetId = resolveTargetTerminal() {
+            BrowserBridgeWatcher.shared.setActiveTarget(targetId, workspaceId: workspaceId)
+        }
+
+        webView.evaluateJavaScript(Self.inspectionModeScript) { [weak self] _, error in
+            guard let self else { return }
+            if let error {
+                NSLog("BrowserPanel inspectionMode inject error: %@", error.localizedDescription)
+                self.isInspectionModeActive = false
+                return
+            }
+            #if DEBUG
+            dlog("browser.inspect.enabled surfaceId=\(self.inspectionSurfaceId)")
+            #endif
+        }
+        return true
+    }
+
+    func disableInspectionMode() {
+        guard isInspectionModeActive else { return }
+        isInspectionModeActive = false
+        webView.evaluateJavaScript("window.__cmuxInspectCleanup && window.__cmuxInspectCleanup()") { _, _ in }
+
+        // Remove inspection markers.
+        try? FileManager.default.removeItem(at: Self.bridgeBaseDir.appendingPathComponent("inspecting"))
+        try? FileManager.default.removeItem(at: Self.bridgeBaseDir.appendingPathComponent("active-target"))
+
+        #if DEBUG
+        dlog("browser.inspect.disabled picked=\(inspectionPickCount)")
+        #endif
+    }
+
+    func toggleInspectionMode() {
+        if isInspectionModeActive {
+            disableInspectionMode()
+        } else {
+            enableInspectionMode()
+        }
+    }
+
+    /// Handle an element pick from the JS injection (called by InspectionMessageHandler).
+    func handleInspectedElement(_ data: [String: Any]) {
+        // Resolve target dynamically — picks always go to the last focused terminal with an agent.
+        guard let targetId = resolveTargetTerminal() else {
+            #if DEBUG
+            dlog("browser.inspect.pick.dropped — no agent listening")
+            #endif
+            return
+        }
+
+        inspectionPickCount += 1
+
+        try? FileManager.default.createDirectory(at: Self.bridgeBaseDir, withIntermediateDirectories: true)
+
+        var payload = data
+        payload["timestamp"] = Self.isoFormatter.string(from: Date())
+        payload["surface_id"] = inspectionSurfaceId
+        payload["pick_index"] = inspectionPickCount
+        payload["event_id"] = UUID().uuidString
+
+        let fileURL = bridgeFileURL(for: targetId)
+        if let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+           var line = String(data: jsonData, encoding: .utf8) {
+            line += "\n"
+
+            if let handle = try? FileHandle(forWritingTo: fileURL),
+               let lineData = line.data(using: .utf8) {
+                handle.seekToEndOfFile()
+                handle.write(lineData)
+                handle.closeFile()
+            } else {
+                try? line.write(to: fileURL, atomically: true, encoding: .utf8)
+            }
+        }
+
+        #if DEBUG
+        dlog("browser.inspect.pick #\(inspectionPickCount) selector=\(data["selector"] ?? "") target=\(targetId.uuidString.prefix(5))")
+        #endif
     }
 
     func sessionNavigationHistorySnapshot() -> (
@@ -2942,6 +3328,7 @@ func browserNavigationShouldOpenInNewTab(
 
 private class BrowserNavigationDelegate: NSObject, WKNavigationDelegate {
     var didFinish: ((WKWebView) -> Void)?
+    var didCommitNavigation: (() -> Void)?
     var didFailNavigation: ((WKWebView, String) -> Void)?
     var openInNewTab: ((URL) -> Void)?
     var shouldBlockInsecureHTTPNavigation: ((URL) -> Bool)?
@@ -2954,6 +3341,10 @@ private class BrowserNavigationDelegate: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         lastAttemptedURL = webView.url
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        didCommitNavigation?()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -3392,6 +3783,26 @@ private class BrowserUIDelegate: NSObject, WKUIDelegate {
             } else {
                 completionHandler(nil)
             }
+        }
+    }
+}
+
+// MARK: - Inspection Message Handler (browser-bridge)
+
+/// WKScriptMessageHandler that receives element picks from the inspection mode JS
+/// and forwards them to the owning BrowserPanel.
+/// Uses a weak reference to avoid retain cycles with WKUserContentController.
+private class InspectionMessageHandler: NSObject, WKScriptMessageHandler {
+    weak var panel: BrowserPanel?
+
+    func userContentController(
+        _ controller: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        guard message.name == "cmuxInspect",
+              let dict = message.body as? [String: Any] else { return }
+        Task { @MainActor [weak self] in
+            self?.panel?.handleInspectedElement(dict)
         }
     }
 }

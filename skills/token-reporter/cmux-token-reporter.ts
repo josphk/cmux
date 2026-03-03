@@ -45,7 +45,15 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  function reportTokens(ctx: any) {
+  /**
+   * Sum token usage from all assistant messages in the session branch.
+   *
+   * @param pendingMessage - An assistant message not yet persisted to the branch.
+   *   On `message_end`, pi emits to extensions *before* appending the message to
+   *   the session manager, so `getBranch()` doesn't include it yet. We pass it
+   *   explicitly so cost reflects the just-completed LLM call.
+   */
+  function reportTokens(ctx: any, pendingMessage?: any) {
     const branch = ctx.sessionManager.getBranch();
     let totalInput = 0, totalOutput = 0, totalCacheRead = 0, totalCacheWrite = 0, totalCost = 0;
 
@@ -58,6 +66,15 @@ export default function (pi: ExtensionAPI) {
         totalCacheWrite += msg.usage.cacheWrite ?? 0;
         totalCost += msg.usage.cost?.total ?? 0;
       }
+    }
+
+    // Include the pending message that hasn't been appended to the branch yet
+    if (pendingMessage?.usage) {
+      totalInput += pendingMessage.usage.input ?? 0;
+      totalOutput += pendingMessage.usage.output ?? 0;
+      totalCacheRead += pendingMessage.usage.cacheRead ?? 0;
+      totalCacheWrite += pendingMessage.usage.cacheWrite ?? 0;
+      totalCost += pendingMessage.usage.cost?.total ?? 0;
     }
 
     // Debounce: skip if cost hasn't meaningfully changed
@@ -78,6 +95,17 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
+  // Report after each assistant message ends (mid-turn), so cost updates
+  // incrementally during multi-step tool-use turns — not just at agent_end.
+  // NOTE: pi emits to extensions BEFORE appending the message to the session,
+  // so we pass event.message as the pending message to include its usage.
+  pi.on("message_end", async (event, ctx) => {
+    if (event.message?.role === "assistant") {
+      reportTokens(ctx, event.message);
+    }
+  });
+
+  // Also report at agent_end as a final catch-all (branch is fully populated).
   pi.on("agent_end", async (_event, ctx) => {
     reportTokens(ctx);
   });

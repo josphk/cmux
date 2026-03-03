@@ -5552,6 +5552,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
+        // Toggle browser inspection/picker mode: Cmd+Shift+I
+        if flags == [.command, .shift] && (chars == "I" || event.keyCode == 34) {
+            // Try focused browser first, then find any browser in the workspace.
+            let browserPanel: BrowserPanel? = tabManager?.focusedBrowserPanel
+                ?? tabManager?.selectedTab?.panels.values.first(where: { $0 is BrowserPanel }) as? BrowserPanel
+            if let browserPanel {
+                if browserPanel.isInspectionModeActive {
+                    browserPanel.disableInspectionMode()
+                } else {
+                    browserPanel.enableInspectionMode()
+                }
+                #if DEBUG
+                dlog("shortcut.action name=toggleBrowserInspection panel=\(browserPanel.id.uuidString.prefix(5)) active=\(browserPanel.isInspectionModeActive)")
+                #endif
+                return true
+            }
+        }
+
         // Focus browser address bar: Cmd+L
         if flags == [.command] && chars == "l" {
             if let focusedPanel = tabManager?.focusedBrowserPanel {

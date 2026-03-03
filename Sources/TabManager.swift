@@ -1472,8 +1472,12 @@ class TabManager: ObservableObject {
 
         panel.focus()
 
-        // For terminal panels, ensure proper focus handling
+        // For terminal panels, ensure proper focus handling and update browser bridge target.
         if let terminalPanel = panel as? TerminalPanel {
+            // If this workspace has an active browser inspection, update the bridge target.
+            if tab.panels.values.contains(where: { ($0 as? BrowserPanel)?.isInspectionModeActive == true }) {
+                BrowserBridgeWatcher.shared.setActiveTarget(terminalPanel.id, workspaceId: selectedTabId)
+            }
             terminalPanel.hostedView.ensureFocus(for: selectedTabId, surfaceId: panelId)
         }
     }

@@ -3415,6 +3415,48 @@ struct CMUXCLI {
             return
         }
 
+        if subcommand == "inspect" {
+            let sid = try requireSurface()
+
+            let waitMode = hasFlag(subArgs, name: "--wait")
+            let (timeoutMsStr, _) = parseOption(subArgs, name: "--timeout-ms")
+
+            var params: [String: Any] = ["surface_id": sid]
+
+            if waitMode {
+                params["wait"] = true
+            }
+
+            if let timeoutMsStr {
+                guard let ms = Int(timeoutMsStr) else {
+                    throw CLIError(message: "--timeout-ms must be an integer")
+                }
+                params["timeout_ms"] = ms
+            }
+
+            let payload = try client.sendV2(method: "browser.inspect", params: params)
+
+            if jsonOutput {
+                print(jsonString(formatIDs(payload, mode: idFormat)))
+            } else if waitMode {
+                if let picks = payload["picks"] as? [Any], !picks.isEmpty {
+                    if JSONSerialization.isValidJSONObject(picks),
+                       let data = try? JSONSerialization.data(withJSONObject: picks, options: [.prettyPrinted]),
+                       let text = String(data: data, encoding: .utf8) {
+                        print(text)
+                    } else {
+                        print(jsonString(payload))
+                    }
+                } else {
+                    print("No elements picked.")
+                }
+            } else {
+                let status = (payload["status"] as? String) ?? "OK"
+                output(payload, fallback: "Inspection mode \(status)")
+            }
+            return
+        }
+
         throw CLIError(message: "Unsupported browser subcommand: \(subcommand)")
     }
 
