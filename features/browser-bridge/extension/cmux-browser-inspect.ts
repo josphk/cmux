@@ -183,6 +183,11 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	const presenceFile = path.join(BRIDGE_DIR, `${surfaceId}.listening`);
 
 	function startWatching(): void {
+		// Close any existing watchers/intervals to prevent zombies (e.g., after /reload
+		// or when session_start fires after module-level init).
+		if (dirWatcher) { dirWatcher.close(); dirWatcher = null; }
+		if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+
 		try {
 			fs.mkdirSync(BRIDGE_DIR, { recursive: true });
 		} catch {
@@ -208,16 +213,11 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 					processBridgeFile();
 				}
 			});
-			dirWatcher.on("error", () => {
-				console.log("[browser-bridge] fs.watch error, relying on polling fallback");
-			});
-		} catch {
-			console.log("[browser-bridge] fs.watch unavailable, relying on polling fallback");
-		}
+			dirWatcher.on("error", () => {});
+		} catch {}
 
-		// Fallback: 2-second polling (catches anything fs.watch misses)
+		// Fallback: polling (catches anything fs.watch misses)
 		pollInterval = setInterval(processBridgeFile, POLL_INTERVAL_MS);
-
 	}
 
 	function stopWatching(): void {
@@ -273,7 +273,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	}
 
 	function startTargetWatcher(): void {
-		if (targetWatcher) return;
+		if (targetWatcher) { targetWatcher.close(); targetWatcher = null; }
 		try {
 			targetWatcher = fs.watch(BRIDGE_DIR, (_eventType, filename) => {
 				if (filename === "active-target" || filename === "inspecting") updateBelowEditorWidgets();
