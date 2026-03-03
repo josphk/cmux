@@ -20,7 +20,29 @@ A browser-to-agent bridge that lets you click elements in the cmux browser panel
 - **Flow B (agent-initiated)** — `browser_inspect` tool the LLM can call to request the user pick elements, with `--wait` mode and timeout
 - **`/inspect` command** — toggle inspection from the pi prompt
 
-### Architecture
+## How It Works
+
+The browser bridge connects three layers: the browser page, the cmux app, and the pi agent. Each layer has a single responsibility and they communicate through simple, ephemeral files.
+
+### The browser side
+
+When the user enters pick mode, cmux injects a small JavaScript script into the browser page. This script adds a crosshair cursor, draws a blue highlight overlay as the user moves their mouse over elements, and shows a tooltip with the element's role and label. When the user clicks, the script extracts structured data about the element — its CSS selector, text content, ARIA role, tag name, and relevant attributes — and posts it back to Swift via WebKit's native message handler bridge. The user stays in pick mode and can click more elements. A green flash confirms each pick.
+
+### The cmux app side
+
+When cmux receives a pick from the browser, it figures out which terminal should get it. It checks which terminal was most recently focused and whether that terminal has an active pi agent (known via presence marker files that each agent writes on startup). Once it finds the right target, it appends the pick data as a JSON line to a bridge file scoped to that terminal's surface ID. This is the entire handoff — a single file append.
+
+cmux also manages the coordination signals: an `inspecting` marker file that exists only while pick mode is active, and an `active-target` file that tracks which terminal in which workspace is the current target. These are written on inspection toggle and terminal focus changes, and cleaned up when inspection ends.
+
+### The pi extension side
+
+Each pi agent runs a file system watcher on the bridge directory. When it sees new lines in its own bridge file, it parses them, assigns incrementing pick IDs (`<1>`, `<2>`, ...), stores them in memory, shows them in a styled widget below the editor, and auto-appends the ID reference to the editor text.
+
+The key design decision: picks are **not sent to the LLM immediately**. They're held in memory until the user submits their message. At that point, the extension scans the prompt for `<N>` references and injects only the referenced picks as context. If the user deleted `<1>` from their prompt, that pick's data never reaches the model. This keeps context lean and gives the user full control over what the agent sees.
+
+The extension also watches the `inspecting` and `active-target` files to show a status indicator ("● Ready for browser picks") only on the agent that will actually receive picks, and only while pick mode is active.
+
+### Architecture diagram
 
 ```
 Browser (WKWebView)
@@ -36,13 +58,14 @@ Pi Extension (cmux-browser-inspect.ts)
 Agent LLM context
 ```
 
-### Bridge Protocol
+### Bridge files
 
-Files in `/tmp/cmux-browser-bridge/`:
-- `<surfaceId>.listening` — presence marker written by pi extension (PID)
-- `<surfaceId>.jsonl` — pick data written by cmux, one JSON object per line
-- `inspecting` — marker file, exists only while pick mode is active
-- `active-target` — `workspaceId:surfaceId` format, written on terminal focus change (only during inspection)
+All bridge state lives in `/tmp/cmux-browser-bridge/`. Nothing is persistent — files are ephemeral transport cleaned up when inspection ends or agents disconnect.
+
+- `<surfaceId>.listening` — presence marker written by pi extension on startup, removed on shutdown
+- `<surfaceId>.jsonl` — pick data, one JSON object per line, appended by cmux, read by extension
+- `inspecting` — exists only while pick mode is active
+- `active-target` — `workspaceId:surfaceId`, written on terminal focus change during inspection
 
 ### CLI Commands Added
 
