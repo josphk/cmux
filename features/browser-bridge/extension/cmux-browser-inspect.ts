@@ -189,13 +189,10 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 			// Already exists or permissions issue — continue anyway.
 		}
 
-		// Skip any lines already in the file from a previous session.
-		try {
-			if (fs.existsSync(bridgeFile)) {
-				const existing = fs.readFileSync(bridgeFile, "utf-8");
-				linesRead = existing.split("\n").filter((l) => l.trim()).length;
-			}
-		} catch {}
+		// Delete bridge file on init so stale watcher instances (from /reload)
+		// never process new lines (their linesRead > new file's line count).
+		try { fs.unlinkSync(bridgeFile); } catch {}
+		linesRead = 0;
 
 		// Write presence marker so cmux knows we're listening.
 		try {
