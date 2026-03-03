@@ -77,8 +77,24 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	let dirWatcher: fs.FSWatcher | null = null;
 	let pollInterval: ReturnType<typeof setInterval> | null = null;
 
-	// ── Pick counter (resets per agent turn) ──────────────────────────────
+	// ── Pick state (resets per agent turn) ────────────────────────────────
 	let pickCounter = 0;
+	/** Pending picks indexed by ID. Only referenced picks are sent to the LLM. */
+	const pendingPicks = new Map<number, { formatted: string }>();
+
+	/** Update the picks widget below the editor. */
+	function updatePicksWidget(): void {
+		if (!uiRef) return;
+		if (pendingPicks.size === 0) {
+			uiRef.setWidget("browser-picks", undefined);
+			return;
+		}
+		const lines: string[] = [];
+		for (const [id, pick] of pendingPicks) {
+			lines.push(`<${id}>  ${pick.formatted}`);
+		}
+		uiRef.setWidget("browser-picks", lines, { placement: "belowEditor" });
+	}
 
 	// ── Bridge file processing ────────────────────────────────────────────
 
@@ -102,11 +118,9 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 					const pickId = pickCounter;
 					const formatted = formatElement(el, pickId);
 
-					pi.sendMessage({
-						customType: "browser-pick",
-						content: `<${pickId}>\n\n${formatted}`,
-						display: "user",
-					}, { triggerTurn: false });
+					// Store for later — full data only injected if referenced in the user message.
+					pendingPicks.set(pickId, { formatted });
+					updatePicksWidget();
 
 					// Auto-append the pick reference to the editor.
 					const currentText = uiRef.getEditorText();
@@ -187,6 +201,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	let targetWatcher: fs.FSWatcher | null = null;
 	let uiRef: {
 		setStatus: (key: string, text: string | undefined) => void;
+		setWidget: (key: string, content: string[] | undefined, options?: { placement?: string }) => void;
 		getEditorText: () => string;
 		setEditorText: (text: string) => void;
 	} | null = null;
@@ -243,9 +258,40 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// Reset pick counter when a new agent turn starts (user submitted their message).
-	pi.on("before_agent_start", async () => {
+	// Inject only referenced picks into the LLM context, then reset.
+	pi.on("before_agent_start", async (event) => {
+		let result: { message: { customType: string; content: string; display: boolean } } | undefined;
+
+		if (pendingPicks.size > 0) {
+			// Find all <N> references in the user's prompt.
+			const referencedIds: number[] = [];
+			const refPattern = /<(\d+)>/g;
+			let match: RegExpExecArray | null;
+			while ((match = refPattern.exec(event.prompt)) !== null) {
+				const id = parseInt(match[1], 10);
+				if (pendingPicks.has(id)) {
+					referencedIds.push(id);
+				}
+			}
+
+			if (referencedIds.length > 0) {
+				const lines = referencedIds.map((id) => pendingPicks.get(id)!.formatted);
+				result = {
+					message: {
+						customType: "browser-picks-context",
+						content: lines.join("\n"),
+						display: false,
+					},
+				};
+			}
+		}
+
+		// Reset for next round of picks.
 		pickCounter = 0;
+		pendingPicks.clear();
+		updatePicksWidget();
+
+		return result;
 	});
 
 	pi.on("session_shutdown", async () => {
