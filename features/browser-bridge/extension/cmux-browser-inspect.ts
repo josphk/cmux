@@ -158,6 +158,8 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 					// Store for later — full data only injected if referenced in the user message.
 					pendingPicks.set(pickId, { formatted });
 					updatePicksWidget();
+					// Re-set status so it stays below picks (Map insertion order).
+					checkActiveTarget();
 
 					// Auto-append the pick reference to the editor.
 					const currentText = uiRef.getEditorText();
@@ -237,8 +239,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	const activeTargetFile = path.join(BRIDGE_DIR, "active-target");
 	let targetWatcher: fs.FSWatcher | null = null;
 	let uiRef: {
-		setStatus: (key: string, text: string | undefined) => void;
-		setWidget: (key: string, content: string[] | undefined, options?: { placement?: string }) => void;
+		setWidget: (key: string, content: any, options?: { placement?: string }) => void;
 		getEditorText: () => string;
 		setEditorText: (text: string) => void;
 	} | null = null;
@@ -255,12 +256,19 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 			// Format: workspaceId:surfaceId
 			const [targetWorkspace, targetSurface] = content.split(":");
 			if (isInspecting && targetSurface === surfaceId && targetWorkspace === workspaceId) {
-				uiRef.setStatus("browser-bridge", "● Ready for browser picks");
+				uiRef.setWidget("browser-bridge-status", (_tui, _theme) => ({
+					invalidate() {},
+					render(width: number): string[] {
+						const dot = `${BLUE}●${RESET}`;
+						const text = `${BLUE_DIM} Ready for browser picks${RESET}`;
+						return [dot + text];
+					},
+				}), { placement: "belowEditor" });
 			} else {
-				uiRef.setStatus("browser-bridge", undefined);
+				uiRef.setWidget("browser-bridge-status", undefined);
 			}
 		} catch {
-			uiRef.setStatus("browser-bridge", undefined);
+			uiRef.setWidget("browser-bridge-status", undefined);
 		}
 	}
 
