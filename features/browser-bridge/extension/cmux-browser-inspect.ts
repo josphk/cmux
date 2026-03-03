@@ -4,7 +4,7 @@
  * Bridges browser element picks from cmux inspection mode into the pi agent conversation.
  *
  * Flow A (user-initiated): Watches /tmp/cmux-browser-bridge/*.jsonl for new picks and injects them
- *         as numbered references (<1>, <2>, ...) that the user can reference in their prompt.
+ *         as numbered references (❮1❯, ❮2❯, ...) that the user can reference in their prompt.
  * Flow B (agent-initiated): Provides a `browser_inspect` tool the LLM can call to request
  *         the user pick elements.
  * Command: `/inspect` toggles inspection mode in the cmux browser panel.
@@ -37,10 +37,10 @@ const ELEMENT_ATTRS = [
  * Format a picked element record as an XML-like tag with a pick ID.
  *
  * Example output:
- *   <browser-element pick="<1>" selector="form > button.primary-submit" role="button" text="Submit" page="http://localhost:3000" />
+ *   <browser-element pick="❮1❯" selector="form > button.primary-submit" role="button" text="Submit" page="http://localhost:3000" />
  */
 function formatElement(el: Record<string, unknown>, pickId: number): string {
-	const attrs: string[] = [`pick="<${pickId}>"`];
+	const attrs: string[] = [`pick="❮${pickId}❯"`];
 
 	for (const key of ELEMENT_ATTRS) {
 		const val = el[key];
@@ -112,7 +112,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 					const lines: string[] = [];
 
 					for (const [id, pick] of pendingPicks) {
-						const idStr = `${BOLD}${BLUE}<${id}>${RESET}${BLUE_BG}`;
+						const idStr = `${BOLD}${BLUE}❮${id}❯${RESET}${BLUE_BG}`;
 						const sep = "  ";
 						const idVisLen = visibleLen(idStr);
 						const maxDataLen = width - idVisLen - visibleLen(sep) - 2; // 2 for padding
@@ -145,7 +145,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 	 *  Called BEFORE adding the new pick so incoming ID is also caught. */
 	function cleanEditorText(raw: string): string {
 		return raw
-			.replace(/<(\d+)>/g, (match, num) =>
+			.replace(/❮(\d+)❯/g, (match, num) =>
 				pendingPicks.has(parseInt(num, 10)) ? match : "")
 			.replace(/\s{2,}/g, " ")
 			.trim();
@@ -177,7 +177,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 					pendingPicks.set(pickId, { formatted });
 
 					const separator = currentText.length > 0 ? " " : "";
-					uiRef.setEditorText(`${currentText}${separator}<${pickId}>`);
+					uiRef.setEditorText(`${currentText}${separator}❮${pickId}❯`);
 				} catch {
 					// malformed JSONL line — skip
 				}
@@ -323,7 +323,7 @@ export default function browserBridgeExtension(pi: ExtensionAPI) {
 			// Find all <N> references in the user's prompt (deduplicated).
 			const seen = new Set<number>();
 			const referencedIds: number[] = [];
-			const refPattern = /<(\d+)>/g;
+			const refPattern = /❮(\d+)❯/g;
 			let match: RegExpExecArray | null;
 			while ((match = refPattern.exec(event.prompt)) !== null) {
 				const id = parseInt(match[1], 10);
