@@ -1,11 +1,7 @@
-name: Nightly macOS build
+name: Nightly macOS build (disabled)
 
+# Disabled – re-enable by removing the `if: false` below and restoring triggers.
 on:
-  push:
-    branches: [main]
-  schedule:
-    # Every hour at :30. The 'decide' job skips if main has no new commits.
-    - cron: "30 * * * *"
   workflow_dispatch:
     inputs:
       force:
@@ -13,6 +9,11 @@ on:
         required: false
         default: false
         type: boolean
+  # push:
+  #   branches: [main]
+  # schedule:
+  #   # Every hour at :30. The 'decide' job skips if main has no new commits.
+  #   - cron: "30 * * * *"
 
 concurrency:
   group: nightly-build
